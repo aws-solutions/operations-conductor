@@ -1,0 +1,1916 @@
+# Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License").
+# You may not use this file except in compliance with the License.
+# A copy of the License is located at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# or in the "license" file accompanying this file. This file is distributed
+# on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
+# express or implied. See the License for the specific language governing
+# permissions and limitations under the License.
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "(SO0065) - The AWS CloudFormation template for deployment of the %%SOLUTION_NAME%% Solution. Version %%VERSION%%"
+
+Parameters:
+    DocumentTagKey:
+        Type: String
+        Description: (Required) Tag key of the Operations Conductor documents.
+        AllowedPattern: ".+"
+    DocumentTagValue:
+        Type: String
+        Description: (Required) Tag value of the Operations Conductor documents.
+        AllowedPattern: ".+"
+    AdministratorName:
+        Type: String
+        Description: (Required) Name of the Operations Conductor adminstrator.
+        Default: Administrator
+        AllowedPattern: ".+"
+    AdministratorEmail:
+        Type: String
+        Description: (Required) Email address for the Operations Conductor administrator.
+        AllowedPattern: "^[_A-Za-z0-9-\\+]+(\\.[_A-Za-z0-9-]+)*@[A-Za-z0-9-]+(\\.[A-Za-z0-9]+)*(\\.[A-Za-z]{2,})$"
+    LogLevel:
+        Type: String
+        Description: (Required) Microservice log level (Trace = 0, Debug = 1, Info = 2, Warn = 3, Error = 4, Fatal = 5)
+        Default: 2
+        AllowedValues:
+            - 0
+            - 1
+            - 2
+            - 3
+            - 4
+            - 5
+
+Metadata:
+    AWS::CloudFormation::Interface:
+        ParameterGroups:
+            -
+                Label:
+                    default: Operations Conductor Document Filter Tag
+                Parameters:
+                    - DocumentTagKey
+                    - DocumentTagValue
+            -
+                Label:
+                    default: Operations Conductor Administrator
+                Parameters:
+                    - AdministratorName
+                    - AdministratorEmail
+            -
+                Label:
+                    default: Operations Conductor Logging
+                Parameters:
+                    - LogLevel
+        ParameterLabels:
+            DocumentTagKey:
+                default: Document Tag Key
+            DocumentTagValue:
+                default: Document Tag Value
+            AdministratorName:
+                default: Administrator Name
+            AdministratorEmail:
+                default: Administrator Email
+            LogLevel:
+                default: Log Level
+
+Mappings:
+    SourceCode:
+        General:
+            S3Bucket: "%%BUCKET_NAME%%"
+            KeyPrefix: "%%SOLUTION_NAME%%/%%VERSION%%"
+    Send:
+        AnonymousUsage:
+            Data: "Yes"
+    Solution:
+        Data:
+            Id: "SO0065"
+            Version: "%%VERSION%%"
+
+Resources:
+    # Custom Resources
+    CustomResourceCopyWebsite:
+        Type: Custom::CopyWebsite
+        DependsOn: CustomResourcePolicy
+        Properties:
+            ServiceToken: !GetAtt CustomResourceLambda.Arn
+            SourceS3Bucket: !Join ["-", [!FindInMap ["SourceCode", "General", "S3Bucket"], !Ref "AWS::Region"]]
+            SourceS3Key: !Join ["/", [!FindInMap ["SourceCode", "General", "KeyPrefix"], "console"]]
+            SourceManifest: "site-manifest.json"
+            DestinationS3Bucket: !Ref WebsiteBucket
+
+    CustomResourcePutWebsiteConfig:
+        Type: Custom::PutWebsiteConfig
+        DependsOn: CustomResourceCopyWebsite
+        Properties:
+            ServiceToken: !GetAtt CustomResourceLambda.Arn
+            Region: !Ref "AWS::Region"
+            S3Bucket: !Ref WebsiteBucket
+            S3Key: "assets/aws_exports.js"
+            ConfigItem:
+                UserPoolsId: !Ref UserPool
+                UserPoolsWebClientId: !GetAtt CustomResourceCreateUserPoolClient.ClientId
+                Endpoint: !Sub "https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod"
+
+    CustomResourceCreateDocuments:
+        Type: Custom::CreateDocuments
+        DependsOn: CustomResourcePolicy
+        Properties:
+            ServiceToken: !GetAtt CustomResourceLambda.Arn
+            StackName: !Ref "AWS::StackName"
+            OperationsConductorSharedRoleArn: !GetAtt OperationsConductorSharedRole.Arn
+            TaskExecutionsTableName: !Ref TaskExecutionsTable
+            AutomationExecutionsTableName: !Ref AutomationExecutionsTable
+            ResourceQueueUrl: !Ref ResourceQueue
+            FilterTagKey: !Ref DocumentTagKey
+            FilterTagValue: !Ref DocumentTagValue
+
+    CustomResourceUploadCloudFormationTemplates:
+        Type: Custom::UploadCloudFormationTemplates
+        DependsOn: CustomResourcePolicy
+        Properties:
+            ServiceToken: !GetAtt CustomResourceLambda.Arn
+            StackName: !Ref "AWS::StackName"
+            MasterAccount: !Ref "AWS::AccountId"
+            SolutionVersion: !FindInMap ["Solution", "Data", "Version"]
+            CloudFormationBucket: !Ref CloudFormationBucket
+            ResourceSelectorExecutionRoleArn: !GetAtt ResourceSelectorExecutionRole.Arn
+            DocumentRoleArns:
+                OperationsConductorSharedRoleArn: !GetAtt OperationsConductorSharedRole.Arn
+
+    CustomResourceCreateLambdaEdge:
+        Type: Custom::CreateLambdaEdge
+        DependsOn: CustomResourcePolicy
+        Properties:
+            ServiceToken: !GetAtt CustomResourceLambda.Arn
+            FunctionName: !Sub ${AWS::StackName}-Lambda-Edge
+            Role: !GetAtt LambdaEdgeServiceRole.Arn
+            Code:
+                S3Bucket: !Join ["-", [!FindInMap ["SourceCode", "General", "S3Bucket"], "us-east-1"]]
+                S3Key: !Join ["/", [!FindInMap ["SourceCode", "General", "KeyPrefix"],  "operations-conductor-lambda-edge.zip"]]
+
+    # When CFN UserPoolClient supports PreventUserExistenceErrors parameter, these custom resources can be deleted.
+    CustomResourceCreateUserPoolClient:
+        Type: Custom::CreateUserPoolClient
+        Properties:
+            ServiceToken: !GetAtt CustomResourceLambda.Arn
+            ClientName: "operations-conductor-app"
+            RefreshTokenValidity: 1
+            GenerateSecret: False
+            UserPoolId: !Ref UserPool
+            PreventUserExistenceErrors: "ENABLED"
+
+    CustomResourceDeleteUserPoolClient:
+        Type: Custom::DeleteUserPoolClient
+        Properties:
+            ServiceToken: !GetAtt CustomResourceLambda.Arn
+            UserPoolId: !Ref UserPool
+            ClientId: !GetAtt CustomResourceCreateUserPoolClient.ClientId
+    # When CFN UserPoolClient supports PreventUserExistenceErrors parameter, these custom resources can be deleted.
+
+    CustomResourceAppUuid:
+        Type: Custom::CreateUuid
+        Properties:
+            ServiceToken: !GetAtt CustomResourceLambda.Arn
+
+    CustomResourceAnonymousMetric:
+        Type: Custom::SendAnonymousMetric
+        Properties:
+            ServiceToken: !GetAtt CustomResourceLambda.Arn
+            SendAnonymousUsageData: !FindInMap ["Send", "AnonymousUsage", "Data"]
+            SolutionId: !FindInMap ["Solution", "Data", "Id"]
+            SolutionVersion: !FindInMap ["Solution", "Data", "Version"]
+            SolutionUuid: !GetAtt CustomResourceAppUuid.UUID
+
+    # IAM Permissions
+    CustomResourceRole:
+        Type: AWS::IAM::Role
+        Description: "Rule for the Operations Conductor custom resource Lambda function"
+        Properties:
+            AssumeRolePolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                    -
+                        Effect: "Allow"
+                        Principal:
+                            Service:
+                                - "lambda.amazonaws.com"
+                        Action:
+                            - "sts:AssumeRole"
+            Path: "/"
+
+    CustomResourcePolicy:
+        Type: AWS::IAM::ManagedPolicy
+        Properties:
+            Description: "Policy for the Operations Conductor Helper Lambda function."
+            PolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                    -
+                        Effect: "Allow"
+                        Action:
+                            - "logs:CreateLogGroup"
+                            - "logs:CreateLogStream"
+                            - "logs:PutLogEvents"
+                        Resource:
+                            - !Join ["", ["arn:aws:logs:", !Ref "AWS::Region", ":", !Ref "AWS::AccountId", ":log-group:/aws/lambda/", !Ref CustomResourceLambda, ":*"]]
+                    -
+                        Effect: "Allow"
+                        Action:
+                            - "s3:GetObject"
+                        Resource:
+                            - !Join ["", ["arn:aws:s3:::", !FindInMap ["SourceCode", "General", "S3Bucket"], "-", !Ref "AWS::Region", "/", !FindInMap ["SourceCode", "General", "KeyPrefix"], "/console/*"]]
+                            - !Join ["", ["arn:aws:s3:::", !FindInMap ["SourceCode", "General", "S3Bucket"], "-", "us-east-1", "/", !FindInMap ["SourceCode", "General", "KeyPrefix"], "/operations-conductor-lambda-edge.zip"]]
+                    -
+                        Effect: "Allow"
+                        Action:
+                            - "s3:PutObject"
+                        Resource:
+                            - !Join ["/", [!GetAtt WebsiteBucket.Arn, "*"]]
+                            - !Join ["/", [!GetAtt CloudFormationBucket.Arn, "*"]]
+                    -
+                        Effect: "Allow"
+                        Action:
+                            - "ssm:CreateDocument"
+                            - "ssm:AddTagsToResource"
+                            - "ssm:DeleteDocument"
+                        Resource:
+                            - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:document/*"
+                    -
+                        Effect: "Allow"
+                        Action:
+                            - "iam:PassRole"
+                        Resource:
+                            - !GetAtt OperationsConductorSharedRole.Arn
+                            - !GetAtt LambdaEdgeServiceRole.Arn
+                    -
+                        Effect: "Allow"
+                        Action:
+                            - "lambda:CreateFunction"
+                            - "lambda:PublishVersion"
+                        Resource:
+                            - !Sub "arn:aws:lambda:us-east-1:${AWS::AccountId}:function:${AWS::StackName}-Lambda-Edge"
+                    # To create/delete UserPoolClient by custom resource
+                    -
+                        Effect: "Allow"
+                        Action:
+                            - "cognito-idp:CreateUserPoolClient"
+                            - "cognito-idp:DeleteUserPoolClient"
+                        Resource:
+                            - !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool*"
+            Roles:
+                - !Ref CustomResourceRole
+        Metadata:
+            cfn_nag:
+                rules_to_suppress:
+                    -
+                        id: W13
+                        reason: "The * resource allows to create CloudWatch logs, get console obejcts, put objects to S3 bucket, create/delete SSM documents, and create/delete Cognito UserPool client."
+
+    ApiGatewayLambdaExecutionRole:
+        Type: AWS::IAM::Role
+        Description: "Role for the Operations Conductor API to invoke Lambda functions"
+        Properties:
+            AssumeRolePolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                    -
+                        Effect: "Allow"
+                        Principal:
+                            Service:
+                                - "apigateway.amazonaws.com"
+                        Action:
+                            - "sts:AssumeRole"
+            Path: "/"
+            Policies:
+                -
+                    PolicyName: "ApiGatewayLambdaExecutionPolicy"
+                    PolicyDocument:
+                        Version: "2012-10-17"
+                        Statement:
+                            -
+                                Effect: "Allow"
+                                Action:
+                                    - "lambda:InvokeFunction"
+                                Resource:
+                                    - !GetAtt UserServiceLambda.Arn
+                                    - !GetAtt TaskServiceLambda.Arn
+                                    - !GetAtt ActionServiceLambda.Arn
+
+    UserServiceRole:
+        Type: AWS::IAM::Role
+        Description: "Role for the Operations Conductor user microservice Lambda function"
+        Properties:
+            AssumeRolePolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                    -
+                        Effect: "Allow"
+                        Principal:
+                            Service:
+                                - "lambda.amazonaws.com"
+                        Action:
+                            - "sts:AssumeRole"
+            Path: "/"
+
+    UserServicePolicy:
+        Type: AWS::IAM::ManagedPolicy
+        Properties:
+            Description: "Policy for the Operations Conductor user API microservice Lambda function."
+            PolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                    -
+                        Effect: "Allow"
+                        Action:
+                            - "logs:CreateLogGroup"
+                            - "logs:CreateLogStream"
+                            - "logs:PutLogEvents"
+                        Resource:
+                            - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${UserServiceLambda}:*"
+                    -
+                        Effect: "Allow"
+                        Action:
+                            - "cognito-idp:ListUsers"
+                            - "cognito-idp:AdminGetUser"
+                            - "cognito-idp:AdminListGroupsForUser"
+                            - "cognito-idp:AdminCreateUser"
+                            - "cognito-idp:AdminDeleteUser"
+                            - "cognito-idp:AdminAddUserToGroup"
+                            - "cognito-idp:AdminRemoveUserFromGroup"
+                        Resource:
+                            - !GetAtt UserPool.Arn
+            Roles:
+                - !Ref UserServiceRole
+        Metadata:
+            cfn_nag:
+                rules_to_suppress:
+                    -
+                        id: W13
+                        reason: "The * resource allows to create CloudWatch logs."
+
+    TaskServiceRole:
+        Type: AWS::IAM::Role
+        Description: "Rule for the Operations Conductor task microservice Lambda function"
+        Properties:
+            AssumeRolePolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                    -
+                        Effect: "Allow"
+                        Principal:
+                            Service:
+                                - "lambda.amazonaws.com"
+                        Action:
+                            - "sts:AssumeRole"
+            Path: "/"
+
+    TaskServicePolicy:
+        Type: AWS::IAM::ManagedPolicy
+        Properties:
+            Description: "Policy for the Operations Conductor task API microservice Lambda function."
+            PolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                    -
+                        Effect: "Allow"
+                        Action:
+                            - "logs:CreateLogGroup"
+                            - "logs:CreateLogStream"
+                            - "logs:PutLogEvents"
+                        Resource:
+                            - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${TaskServiceLambda}:*"
+                    -
+                        Effect: "Allow"
+                        Action:
+                            - "dynamodb:Scan"
+                            - "dynamodb:GetItem"
+                            - "dynamodb:PutItem"
+                            - "dynamodb:DeleteItem"
+                        Resource:
+                            - !GetAtt TasksTable.Arn
+                    -
+                        Effect: "Allow"
+                        Action:
+                            - "dynamodb:GetItem"
+                            - "dynamodb:Query"
+                        Resource:
+                            - !GetAtt TaskExecutionsTable.Arn
+                            - !Join ["/", [!GetAtt TaskExecutionsTable.Arn, "index", "taskId-startTime-index"]]
+                            - !GetAtt AutomationExecutionsTable.Arn
+                    -
+                        Effect: "Allow"
+                        Action:
+                            - "events:ListRules"
+                            - "events:PutRule"
+                            - "events:PutTargets"
+                            - "events:RemoveTargets"
+                            - "events:DeleteRule"
+                        Resource:
+                            - !Sub "arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/*"
+                    -
+                        Effect: "Allow"
+                        Action:
+                            - "lambda:InvokeFunction"
+                            - "lambda:AddPermission"
+                            - "lambda:RemovePermission"
+                        Resource:
+                            - !GetAtt ResourceSelectorLambda.Arn
+                    -
+                        Effect: "Allow"
+                        Action:
+                            - "ssm:GetAutomationExecution"
+                        Resource:
+                            - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:automation-execution/*"
+                    -
+                        Effect: "Allow"
+                        Action:
+                            - "s3:ListBucket"
+                            - "s3:GetObject"
+                            - "s3:PutObject"
+                            - "s3:DeleteObject"
+                            - "s3:GetBucketPolicy"
+                            - "s3:DeleteBucketPolicy"
+                            - "s3:PutBucketPolicy"
+                        Resource:
+                            - !GetAtt CloudFormationBucket.Arn
+                            - !Join ["/", [!GetAtt CloudFormationBucket.Arn, "*"]]
+                    -
+                        Effect: "Allow"
+                        Action:
+                            - "sns:AddPermission"
+                            - "sns:RemovePermission"
+                        Resource:
+                            - !Ref EventSnsTopic
+                    -
+                        Effect: "Allow"
+                        Action:
+                            - "kms:GetKeyPolicy"
+                            - "kms:PutKeyPolicy"
+                        Resource:
+                            - !GetAtt SnsEncryptionKey.Arn
+                    -
+                        Effect: "Allow"
+                        Action:
+                            - "ec2:describeRegions"
+                        Resource:
+                            - "*"
+            Roles:
+                - !Ref TaskServiceRole
+        Metadata:
+            cfn_nag:
+                rules_to_suppress:
+                    -
+                        id: W13
+                        reason: "The * resource allows to create CloudWatch logs, control CloudWatch event rules, get/put/delete S3 objects, and describe regions."
+
+    ActionServiceRole:
+        Type: AWS::IAM::Role
+        Description: "Rule for the Operations Conductor action microservice Lambda function"
+        Properties:
+            AssumeRolePolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                    -
+                        Effect: "Allow"
+                        Principal:
+                            Service:
+                                - "lambda.amazonaws.com"
+                        Action:
+                            - "sts:AssumeRole"
+            Path: "/"
+
+    ActionServicePolicy:
+        Type: AWS::IAM::ManagedPolicy
+        Properties:
+            Description: "Policy for the Operations Conductor action API microservice Lambda function."
+            PolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                    -
+                        Effect: "Allow"
+                        Action:
+                            - "logs:CreateLogGroup"
+                            - "logs:CreateLogStream"
+                            - "logs:PutLogEvents"
+                        Resource:
+                            - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${ActionServiceLambda}:*"
+                    -
+                        Effect: "Allow"
+                        Action:
+                            - "ssm:ListDocuments"
+                        Resource:
+                            - "*"
+                    -
+                        Effect: "Allow"
+                        Action:
+                            - "ssm:DescribeDocument"
+                        Resource:
+                            - !Sub "arn:aws:ssm:${AWS::Region}:*:document/*"
+            Roles:
+                - !Ref ActionServiceRole
+        Metadata:
+            cfn_nag:
+                rules_to_suppress:
+                    -
+                        id: W13
+                        reason: "The * resource allows to create CloudWatch logs and get SSM documents."
+
+    ConsumerLambdaExecutionRole:
+        Type: AWS::IAM::Role
+        Description: "Role for the Operations Conductor queue consumer Lambda function"
+        Properties:
+            AssumeRolePolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                    -   Effect: "Allow"
+                        Principal:
+                            Service:
+                                - "lambda.amazonaws.com"
+                        Action:
+                                - "sts:AssumeRole"
+            Path: "/"
+
+    ConsumerLambdaExecutionPolicy:
+        Type: AWS::IAM::ManagedPolicy
+        Properties:
+            Description: "Policy for the Operations Conductor queue consumer Lambda function."
+            PolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                    -   Effect: "Allow"
+                        Action:
+                            - "logs:CreateLogGroup"
+                            - "logs:CreateLogStream"
+                            - "logs:PutLogEvents"
+                        Resource:
+                            - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${ConsumerLambda}:*"
+                    -   Effect: "Allow"
+                        Action:
+                            - "sqs:ReceiveMessage"
+                        Resource:
+                            - !GetAtt ResourceQueue.Arn
+                    -   Effect: "Allow"
+                        Action:
+                            - "ssm:StartAutomationExecution"
+                            - "ssm:DescribeAutomationExecutions"
+                            - "ssm:DescribeAutomationStepExecutions"
+                        Resource:
+                            - "*"
+            Roles:
+                - !Ref ConsumerLambdaExecutionRole
+        Metadata:
+            cfn_nag:
+                rules_to_suppress:
+                    -
+                        id: W13
+                        reason: "The * resource allows to describe automation executions and their steps. Also allowed to start SSM automation executions"
+
+    ResourceSelectorExecutionRole:
+        Type: AWS::IAM::Role
+        Description: "Role for the Operations Conductor Resource Selector Lambda function"
+        Properties:
+            AssumeRolePolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                    -   Effect: "Allow"
+                        Principal:
+                            Service:
+                                - "lambda.amazonaws.com"
+                        Action:
+                                - "sts:AssumeRole"
+            Path: "/"
+
+    ResourceSelectorExecutionPolicy:
+        Type: AWS::IAM::ManagedPolicy
+        Properties:
+            Description: "Policy for the Operations Conductor Resource Selector Lambda function."
+            PolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                    -   Effect: "Allow"
+                        Action:
+                            - "logs:CreateLogGroup"
+                            - "logs:CreateLogStream"
+                            - "logs:PutLogEvents"
+                        Resource:
+                            - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${ResourceSelectorLambda}:*"
+                    -   Effect: "Allow"
+                        Action:
+                            - "dynamodb:PutItem"
+                        Resource:
+                            - !GetAtt TaskExecutionsTable.Arn
+                    -   Effect: "Allow"
+                        Action:
+                            - "sqs:SendMessage"
+                        Resource:
+                            - !GetAtt ResourceQueue.Arn
+                    -   Effect: "Allow"
+                        Action:
+                            - "tag:GetResources"
+                        Resource:
+                            - "*"
+                    -   Effect: "Allow"
+                        Action:
+                            - "sts:AssumeRole"
+                        Resource:
+                            - "*"
+            Roles:
+                - !Ref ResourceSelectorExecutionRole
+        Metadata:
+            cfn_nag:
+                rules_to_suppress:
+                    -
+                        id: W13
+                        reason: "The * resource allows the Resource Selector Lambda to assume a role within another account where specific permissions are given based on the Ops Conductor action."
+
+    OperationsConductorSharedRole:
+        Type: AWS::IAM::Role
+        Description: "Role that applies to all actions possible via Operations Conductor."
+        Properties:
+            AssumeRolePolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                    -   Effect: "Allow"
+                        Principal:
+                            Service:
+                                - "ssm.amazonaws.com"
+                        Action:
+                                - "sts:AssumeRole"
+            Path: "/"
+
+    OperationsConductorSharedPolicy:
+        Type: AWS::IAM::ManagedPolicy
+        Properties:
+            Description: "Policy that applies to all actions possible via Operations Conductor."
+            PolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                    -   Effect: "Allow"
+                        Action:
+                            - "dynamodb:UpdateItem"
+                        Resource:
+                            - !GetAtt TaskExecutionsTable.Arn
+                            - !GetAtt AutomationExecutionsTable.Arn
+                    -   Effect: "Allow"
+                        Action:
+                            - "dynamodb:PutItem"
+                        Resource:
+                            - !GetAtt AutomationExecutionsTable.Arn
+                    -   Effect: "Allow"
+                        Action:
+                            - "sqs:SendMessage"
+                            - "sqs:DeleteMessage"
+                        Resource:
+                            - !GetAtt ResourceQueue.Arn
+                    -   Effect: "Allow"
+                        Action:
+                            - "sts:AssumeRole"
+                        Resource:
+                            - "*"
+            Roles:
+                - !Ref OperationsConductorSharedRole
+        Metadata:
+            cfn_nag:
+                rules_to_suppress:
+                    -
+                        id: W13
+                        reason: "The * resource allows the Ops Conductor Automation Documents to assume a roles within other accounts that grant specific permissions depending on the action."
+
+    EventSnsResourceSelectorExecutionPermission:
+        Type: AWS::Lambda::Permission
+        Properties:
+            FunctionName: !GetAtt ResourceSelectorLambda.Arn
+            Action: "lambda:InvokeFunction"
+            Principal: "sns.amazonaws.com"
+            SourceArn: !Ref EventSnsTopic
+
+    LambdaEdgeServiceRole:
+        Type: AWS::IAM::Role
+        Description: "Rule for the Operations Conductor Lambda edge function."
+        Properties:
+            AssumeRolePolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                    -
+                        Effect: "Allow"
+                        Principal:
+                            Service:
+                                - "lambda.amazonaws.com"
+                                - "edgelambda.amazonaws.com"
+                        Action:
+                            - "sts:AssumeRole"
+            Path: "/"
+
+    LambdaEdgeServicePolicy:
+        Type: AWS::IAM::ManagedPolicy
+        Properties:
+            Description: "Policy for the Operations Conductor Lambda edge function."
+            PolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                    -
+                        Effect: "Allow"
+                        Action:
+                            - "logs:CreateLogGroup"
+                            - "logs:CreateLogStream"
+                            - "logs:PutLogEvents"
+                        Resource:
+                            - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-Lambda-Edge:*"
+            Roles:
+                - !Ref LambdaEdgeServiceRole
+        Metadata:
+            cfn_nag:
+                rules_to_suppress:
+                    -
+                        id: W13
+                        reason: "The * resource allows to create CloudWatch logs."
+
+    # API Gateway
+    ApiGateway:
+        Type: AWS::ApiGateway::RestApi
+        Properties:
+            Body:
+                swagger: "2.0"
+                x-amazon-apigateway-request-validators:
+                    basic:
+                        validateRequestBody: true
+                        validateRequestParameters: true
+                info:
+                    version: "2017-02-24T15:19:00Z"
+                    title:
+                        !Ref "AWS::StackName"
+                basePath: "/prod"
+                schemes:
+                    - "https"
+                x-amazon-apigateway-request-validator: basic
+                paths:
+                    "/users":
+                        options:
+                            consumes:
+                                - "application/json"
+                            produces:
+                                - "application/json"
+                            responses:
+                                "200":
+                                    description: "200 response"
+                                    schema:
+                                        $ref: "#/definitions/Empty"
+                                    headers:
+                                        Access-Control-Allow-Origin:
+                                            type: "string"
+                                        Access-Control-Allow-Methods:
+                                            type: "string"
+                                        Access-Control-Allow-Headers:
+                                            type: "string"
+                            x-amazon-apigateway-integration:
+                                responses:
+                                    default:
+                                        statusCode: "200"
+                                        responseParameters:
+                                            method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS,POST'"
+                                            method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+                                            method.response.header.Access-Control-Allow-Origin: "'*'"
+                                requestTemplates:
+                                    application/json: "{\"statusCode\": 200}"
+                                passthroughBehavior: "when_no_match"
+                                type: "mock"
+                        x-amazon-apigateway-any-method:
+                            produces:
+                                - "application/json"
+                            responses:
+                                "200":
+                                    description: "200 response"
+                                    schema:
+                                        $ref: "#/definitions/Empty"
+                            security:
+                                - operations-conductor-authorizer: []
+                            x-amazon-apigateway-integration:
+                                responses:
+                                    default:
+                                        statusCode: "200"
+                                uri:
+                                    !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${UserServiceLambda.Arn}/invocations"
+                                passthroughBehavior: "when_no_match"
+                                httpMethod: "POST"
+                                contentHandling: "CONVERT_TO_TEXT"
+                                type: "aws_proxy"
+                                credentials: !GetAtt ApiGatewayLambdaExecutionRole.Arn
+                    "/users/{userId}":
+                        options:
+                            consumes:
+                                - "application/json"
+                            produces:
+                                - "application/json"
+                            responses:
+                                "200":
+                                    description: "200 response"
+                                    schema:
+                                        $ref: "#/definitions/Empty"
+                                    headers:
+                                        Access-Control-Allow-Origin:
+                                            type: "string"
+                                        Access-Control-Allow-Methods:
+                                            type: "string"
+                                        Access-Control-Allow-Headers:
+                                            type: "string"
+                            x-amazon-apigateway-integration:
+                                responses:
+                                    default:
+                                        statusCode: "200"
+                                        responseParameters:
+                                            method.response.header.Access-Control-Allow-Methods: "'DELETE,OPTIONS,PUT'"
+                                            method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+                                            method.response.header.Access-Control-Allow-Origin: "'*'"
+                                requestTemplates:
+                                    application/json: "{\"statusCode\": 200}"
+                                passthroughBehavior: "when_no_match"
+                                type: "mock"
+                        x-amazon-apigateway-any-method:
+                            produces:
+                                - "application/json"
+                            parameters:
+                                -
+                                    name: "userId"
+                                    in: "path"
+                                    required: true
+                                    type: "string"
+                            responses:
+                                "200":
+                                    description: "200 response"
+                                    schema:
+                                        $ref: "#/definitions/Empty"
+                            security:
+                                - operations-conductor-authorizer: []
+                            x-amazon-apigateway-integration:
+                                responses:
+                                    default:
+                                        statusCode: "200"
+                                uri:
+                                    !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${UserServiceLambda.Arn}/invocations"
+                                passthroughBehavior: "when_no_match"
+                                httpMethod: "POST"
+                                contentHandling: "CONVERT_TO_TEXT"
+                                type: "aws_proxy"
+                                credentials: !GetAtt ApiGatewayLambdaExecutionRole.Arn
+                    "/tasks":
+                        options:
+                            consumes:
+                                - "application/json"
+                            produces:
+                                - "application/json"
+                            responses:
+                                "200":
+                                    description: "200 response"
+                                    schema:
+                                        $ref: "#/definitions/Empty"
+                                    headers:
+                                        Access-Control-Allow-Origin:
+                                            type: "string"
+                                        Access-Control-Allow-Methods:
+                                            type: "string"
+                                        Access-Control-Allow-Headers:
+                                            type: "string"
+                            x-amazon-apigateway-integration:
+                                responses:
+                                    default:
+                                        statusCode: "200"
+                                        responseParameters:
+                                            method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS,POST'"
+                                            method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+                                            method.response.header.Access-Control-Allow-Origin: "'*'"
+                                requestTemplates:
+                                    application/json: "{\"statusCode\": 200}"
+                                passthroughBehavior: "when_no_match"
+                                type: "mock"
+                        x-amazon-apigateway-any-method:
+                            produces:
+                                - "application/json"
+                            responses:
+                                "200":
+                                    description: "200 response"
+                                    schema:
+                                        $ref: "#/definitions/Empty"
+                            security:
+                                - operations-conductor-authorizer: []
+                            x-amazon-apigateway-integration:
+                                responses:
+                                    default:
+                                        statusCode: "200"
+                                uri:
+                                    !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${TaskServiceLambda.Arn}/invocations"
+                                passthroughBehavior: "when_no_match"
+                                httpMethod: "POST"
+                                contentHandling: "CONVERT_TO_TEXT"
+                                type: "aws_proxy"
+                                credentials: !GetAtt ApiGatewayLambdaExecutionRole.Arn
+                    "/tasks/{taskId}":
+                        options:
+                            consumes:
+                                - "application/json"
+                            produces:
+                                - "application/json"
+                            responses:
+                                "200":
+                                    description: "200 response"
+                                    schema:
+                                        $ref: "#/definitions/Empty"
+                                    headers:
+                                        Access-Control-Allow-Origin:
+                                            type: "string"
+                                        Access-Control-Allow-Methods:
+                                            type: "string"
+                                        Access-Control-Allow-Headers:
+                                            type: "string"
+                            x-amazon-apigateway-integration:
+                                responses:
+                                    default:
+                                        statusCode: "200"
+                                        responseParameters:
+                                            method.response.header.Access-Control-Allow-Methods: "'DELETE,GET,OPTIONS,PUT'"
+                                            method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+                                            method.response.header.Access-Control-Allow-Origin: "'*'"
+                                requestTemplates:
+                                    application/json: "{\"statusCode\": 200}"
+                                passthroughBehavior: "when_no_match"
+                                type: "mock"
+                        x-amazon-apigateway-any-method:
+                            produces:
+                                - "application/json"
+                            parameters:
+                                -
+                                    name: "taskId"
+                                    in: "path"
+                                    required: true
+                                    type: "string"
+                            responses:
+                                "200":
+                                    description: "200 response"
+                                    schema:
+                                        $ref: "#/definitions/Empty"
+                            security:
+                                - operations-conductor-authorizer: []
+                            x-amazon-apigateway-integration:
+                                responses:
+                                    default:
+                                        statusCode: "200"
+                                uri:
+                                    !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${TaskServiceLambda.Arn}/invocations"
+                                passthroughBehavior: "when_no_match"
+                                httpMethod: "POST"
+                                contentHandling: "CONVERT_TO_TEXT"
+                                type: "aws_proxy"
+                                credentials: !GetAtt ApiGatewayLambdaExecutionRole.Arn
+                    "/tasks/{taskId}/execute":
+                        options:
+                            consumes:
+                                - "application/json"
+                            produces:
+                                - "application/json"
+                            responses:
+                                "200":
+                                    description: "200 response"
+                                    schema:
+                                        $ref: "#/definitions/Empty"
+                                    headers:
+                                        Access-Control-Allow-Origin:
+                                            type: "string"
+                                        Access-Control-Allow-Methods:
+                                            type: "string"
+                                        Access-Control-Allow-Headers:
+                                            type: "string"
+                            x-amazon-apigateway-integration:
+                                responses:
+                                    default:
+                                        statusCode: "200"
+                                        responseParameters:
+                                            method.response.header.Access-Control-Allow-Methods: "'OPTIONS,PUT'"
+                                            method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+                                            method.response.header.Access-Control-Allow-Origin: "'*'"
+                                requestTemplates:
+                                    application/json: "{\"statusCode\": 200}"
+                                passthroughBehavior: "when_no_match"
+                                type: "mock"
+                        x-amazon-apigateway-any-method:
+                            produces:
+                                - "application/json"
+                            parameters:
+                                -
+                                    name: "taskId"
+                                    in: "path"
+                                    required: true
+                                    type: "string"
+                            responses:
+                                "200":
+                                    description: "200 response"
+                                    schema:
+                                        $ref: "#/definitions/Empty"
+                            security:
+                                - operations-conductor-authorizer: []
+                            x-amazon-apigateway-integration:
+                                responses:
+                                    default:
+                                        statusCode: "200"
+                                uri:
+                                    !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${TaskServiceLambda.Arn}/invocations"
+                                passthroughBehavior: "when_no_match"
+                                httpMethod: "POST"
+                                contentHandling: "CONVERT_TO_TEXT"
+                                type: "aws_proxy"
+                                credentials: !GetAtt ApiGatewayLambdaExecutionRole.Arn
+                    "/tasks/{taskId}/executions":
+                        options:
+                            consumes:
+                                - "application/json"
+                            produces:
+                                - "application/json"
+                            responses:
+                                "200":
+                                    description: "200 response"
+                                    schema:
+                                        $ref: "#/definitions/Empty"
+                                    headers:
+                                        Access-Control-Allow-Origin:
+                                            type: "string"
+                                        Access-Control-Allow-Methods:
+                                            type: "string"
+                                        Access-Control-Allow-Headers:
+                                            type: "string"
+                            x-amazon-apigateway-integration:
+                                responses:
+                                    default:
+                                        statusCode: "200"
+                                        responseParameters:
+                                            method.response.header.Access-Control-Allow-Methods: "'OPTIONS,POST'"
+                                            method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+                                            method.response.header.Access-Control-Allow-Origin: "'*'"
+                                requestTemplates:
+                                    application/json: "{\"statusCode\": 200}"
+                                passthroughBehavior: "when_no_match"
+                                type: "mock"
+                        x-amazon-apigateway-any-method:
+                            produces:
+                                - "application/json"
+                            parameters:
+                                -
+                                    name: "taskId"
+                                    in: "path"
+                                    required: true
+                                    type: "string"
+                            responses:
+                                "200":
+                                    description: "200 response"
+                                    schema:
+                                        $ref: "#/definitions/Empty"
+                            security:
+                                - operations-conductor-authorizer: []
+                            x-amazon-apigateway-integration:
+                                responses:
+                                    default:
+                                        statusCode: "200"
+                                uri:
+                                    !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${TaskServiceLambda.Arn}/invocations"
+                                passthroughBehavior: "when_no_match"
+                                httpMethod: "POST"
+                                contentHandling: "CONVERT_TO_TEXT"
+                                type: "aws_proxy"
+                                credentials: !GetAtt ApiGatewayLambdaExecutionRole.Arn
+                    "/tasks/{taskId}/executions/{parentExecutionId}":
+                        options:
+                            consumes:
+                                - "application/json"
+                            produces:
+                                - "application/json"
+                            responses:
+                                "200":
+                                    description: "200 response"
+                                    schema:
+                                        $ref: "#/definitions/Empty"
+                                    headers:
+                                        Access-Control-Allow-Origin:
+                                            type: "string"
+                                        Access-Control-Allow-Methods:
+                                            type: "string"
+                                        Access-Control-Allow-Headers:
+                                            type: "string"
+                            x-amazon-apigateway-integration:
+                                responses:
+                                    default:
+                                        statusCode: "200"
+                                        responseParameters:
+                                            method.response.header.Access-Control-Allow-Methods: "'OPTIONS,POST'"
+                                            method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+                                            method.response.header.Access-Control-Allow-Origin: "'*'"
+                                requestTemplates:
+                                    application/json: "{\"statusCode\": 200}"
+                                passthroughBehavior: "when_no_match"
+                                type: "mock"
+                        x-amazon-apigateway-any-method:
+                            produces:
+                                - "application/json"
+                            parameters:
+                                -
+                                    name: "taskId"
+                                    in: "path"
+                                    required: true
+                                    type: "string"
+                                -
+                                    name: "parentExecutionId"
+                                    in: "path"
+                                    required: true
+                                    type: "string"
+                            responses:
+                                "200":
+                                    description: "200 response"
+                                    schema:
+                                        $ref: "#/definitions/Empty"
+                            security:
+                                - operations-conductor-authorizer: []
+                            x-amazon-apigateway-integration:
+                                responses:
+                                    default:
+                                        statusCode: "200"
+                                uri:
+                                    !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${TaskServiceLambda.Arn}/invocations"
+                                passthroughBehavior: "when_no_match"
+                                httpMethod: "POST"
+                                contentHandling: "CONVERT_TO_TEXT"
+                                type: "aws_proxy"
+                                credentials: !GetAtt ApiGatewayLambdaExecutionRole.Arn
+                    "/tasks/{taskId}/executions/{parentExecutionId}/{automationExecutionId}":
+                        options:
+                            consumes:
+                                - "application/json"
+                            produces:
+                                - "application/json"
+                            responses:
+                                "200":
+                                    description: "200 response"
+                                    schema:
+                                        $ref: "#/definitions/Empty"
+                                    headers:
+                                        Access-Control-Allow-Origin:
+                                            type: "string"
+                                        Access-Control-Allow-Methods:
+                                            type: "string"
+                                        Access-Control-Allow-Headers:
+                                            type: "string"
+                            x-amazon-apigateway-integration:
+                                responses:
+                                    default:
+                                        statusCode: "200"
+                                        responseParameters:
+                                            method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+                                            method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+                                            method.response.header.Access-Control-Allow-Origin: "'*'"
+                                requestTemplates:
+                                    application/json: "{\"statusCode\": 200}"
+                                passthroughBehavior: "when_no_match"
+                                type: "mock"
+                        x-amazon-apigateway-any-method:
+                            produces:
+                                - "application/json"
+                            parameters:
+                                -
+                                    name: "taskId"
+                                    in: "path"
+                                    required: true
+                                    type: "string"
+                                -
+                                    name: "parentExecutionId"
+                                    in: "path"
+                                    required: true
+                                    type: "string"
+                                -
+                                    name: "automationExecutionId"
+                                    in: "path"
+                                    required: true
+                                    type: "string"
+                            responses:
+                                "200":
+                                    description: "200 response"
+                                    schema:
+                                        $ref: "#/definitions/Empty"
+                            security:
+                                - operations-conductor-authorizer: []
+                            x-amazon-apigateway-integration:
+                                responses:
+                                    default:
+                                        statusCode: "200"
+                                uri:
+                                    !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${TaskServiceLambda.Arn}/invocations"
+                                passthroughBehavior: "when_no_match"
+                                httpMethod: "POST"
+                                contentHandling: "CONVERT_TO_TEXT"
+                                type: "aws_proxy"
+                                credentials: !GetAtt ApiGatewayLambdaExecutionRole.Arn
+                    "/actions":
+                        options:
+                            consumes:
+                                - "application/json"
+                            produces:
+                                - "application/json"
+                            responses:
+                                "200":
+                                    description: "200 response"
+                                    schema:
+                                        $ref: "#/definitions/Empty"
+                                    headers:
+                                        Access-Control-Allow-Origin:
+                                            type: "string"
+                                        Access-Control-Allow-Methods:
+                                            type: "string"
+                                        Access-Control-Allow-Headers:
+                                            type: "string"
+                            x-amazon-apigateway-integration:
+                                responses:
+                                    default:
+                                        statusCode: "200"
+                                        responseParameters:
+                                            method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+                                            method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+                                            method.response.header.Access-Control-Allow-Origin: "'*'"
+                                requestTemplates:
+                                    application/json: "{\"statusCode\": 200}"
+                                passthroughBehavior: "when_no_match"
+                                type: "mock"
+                        x-amazon-apigateway-any-method:
+                            produces:
+                                - "application/json"
+                            responses:
+                                "200":
+                                    description: "200 response"
+                                    schema:
+                                        $ref: "#/definitions/Empty"
+                            security:
+                                - operations-conductor-authorizer: []
+                            x-amazon-apigateway-integration:
+                                responses:
+                                    default:
+                                        statusCode: "200"
+                                uri:
+                                    !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ActionServiceLambda.Arn}/invocations"
+                                passthroughBehavior: "when_no_match"
+                                httpMethod: "POST"
+                                contentHandling: "CONVERT_TO_TEXT"
+                                type: "aws_proxy"
+                                credentials: !GetAtt ApiGatewayLambdaExecutionRole.Arn
+                    "/actions/{actionId}":
+                        options:
+                            consumes:
+                                - "application/json"
+                            produces:
+                                - "application/json"
+                            responses:
+                                "200":
+                                    description: "200 response"
+                                    schema:
+                                        $ref: "#/definitions/Empty"
+                                    headers:
+                                        Access-Control-Allow-Origin:
+                                            type: "string"
+                                        Access-Control-Allow-Methods:
+                                            type: "string"
+                                        Access-Control-Allow-Headers:
+                                            type: "string"
+                            x-amazon-apigateway-integration:
+                                responses:
+                                    default:
+                                        statusCode: "200"
+                                        responseParameters:
+                                            method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+                                            method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+                                            method.response.header.Access-Control-Allow-Origin: "'*'"
+                                requestTemplates:
+                                    application/json: "{\"statusCode\": 200}"
+                                passthroughBehavior: "when_no_match"
+                                type: "mock"
+                        x-amazon-apigateway-any-method:
+                            produces:
+                                - "application/json"
+                            parameters:
+                                -
+                                    name: "actionId"
+                                    in: "path"
+                                    required: true
+                                    type: "string"
+                            responses:
+                                "200":
+                                    description: "200 response"
+                                    schema:
+                                        $ref: "#/definitions/Empty"
+                            security:
+                                - operations-conductor-authorizer: []
+                            x-amazon-apigateway-integration:
+                                responses:
+                                    default:
+                                        statusCode: "200"
+                                uri:
+                                    !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ActionServiceLambda.Arn}/invocations"
+                                passthroughBehavior: "when_no_match"
+                                httpMethod: "POST"
+                                contentHandling: "CONVERT_TO_TEXT"
+                                type: "aws_proxy"
+                                credentials: !GetAtt ApiGatewayLambdaExecutionRole.Arn
+                securityDefinitions:
+                    operations-conductor-authorizer:
+                        type: "apiKey"
+                        name: "Authorization"
+                        in: "header"
+                        x-amazon-apigateway-authtype: "cognito_user_pools"
+                        x-amazon-apigateway-authorizer:
+                            providerARNs:
+                            - !GetAtt UserPool.Arn
+                            type: "cognito_user_pools"
+                definitions:
+                    Empty:
+                        type: "object"
+                        title: "Empty Schema"
+
+    ApiGatewayDeployment:
+        Type: AWS::ApiGateway::Deployment
+        Properties:
+            RestApiId: !Ref ApiGateway
+            Description: "Production"
+            StageName: "prod"
+        Metadata:
+            cfn_nag:
+                rules_to_suppress:
+                    -
+                        id: W45
+                        reason: "This solution does not require API Gateway access logging."
+
+    # Lambda Functions
+    CustomResourceLambda:
+        Type: AWS::Lambda::Function
+        Properties:
+            Description: "Operations Conductor custom resource helper function"
+            Code:
+                S3Bucket: !Join ["-", [!FindInMap ["SourceCode", "General", "S3Bucket"], !Ref "AWS::Region"]]
+                S3Key: !Join ["/", [!FindInMap ["SourceCode", "General", "KeyPrefix"],  "operations-conductor-services.zip"]]
+            Handler: custom-resource/index.handler
+            Role: !GetAtt CustomResourceRole.Arn
+            Runtime: nodejs10.x
+            MemorySize: 256
+            Timeout: 300
+            Environment:
+                Variables:
+                    LogLevel: !Ref LogLevel
+
+    UserServiceLambda:
+        Type: AWS::Lambda::Function
+        Properties:
+            Description: "The user microservice for Operations Conductor"
+            Code:
+                S3Bucket: !Join ["-", [!FindInMap ["SourceCode", "General", "S3Bucket"], !Ref "AWS::Region"]]
+                S3Key: !Join ["/", [!FindInMap ["SourceCode", "General", "KeyPrefix"],  "operations-conductor-services.zip"]]
+            Handler: users/index.handler
+            Role: !GetAtt UserServiceRole.Arn
+            Runtime: nodejs10.x
+            MemorySize: 256
+            Timeout: 60
+            Environment:
+                Variables:
+                    CognitoUserPool: !Ref UserPool
+                    SendAnonymousUsageData: !FindInMap ["Send", "AnonymousUsage", "Data"]
+                    SolutionId: !FindInMap ["Solution", "Data", "Id"]
+                    SolutionVersion: !FindInMap ["Solution", "Data", "Version"]
+                    SolutionUuid: !GetAtt CustomResourceAppUuid.UUID
+                    LogLevel: !Ref LogLevel
+
+    TaskServiceLambda:
+        Type: AWS::Lambda::Function
+        Properties:
+            Description: "The task microservice for Operations Conductor"
+            Code:
+                S3Bucket: !Join ["-", [!FindInMap ["SourceCode", "General", "S3Bucket"], !Ref "AWS::Region"]]
+                S3Key: !Join ["/", [!FindInMap ["SourceCode", "General", "KeyPrefix"],  "operations-conductor-services.zip"]]
+            Handler: tasks/index.handler
+            Role: !GetAtt TaskServiceRole.Arn
+            Runtime: nodejs10.x
+            MemorySize: 256
+            Timeout: 60
+            Environment:
+                Variables:
+                    TasksTable: !Ref TasksTable
+                    TaskExecutionsTable: !Ref TaskExecutionsTable
+                    AutomationExecutionsTable: !Ref AutomationExecutionsTable
+                    ResourceSelectorLambdaArn: !GetAtt ResourceSelectorLambda.Arn
+                    CloudFormationBucket: !Ref CloudFormationBucket
+                    SendAnonymousUsageData: !FindInMap ["Send", "AnonymousUsage", "Data"]
+                    SolutionId: !FindInMap ["Solution", "Data", "Id"]
+                    SolutionVersion: !FindInMap ["Solution", "Data", "Version"]
+                    SolutionUuid: !GetAtt CustomResourceAppUuid.UUID
+                    AccountId: !Ref "AWS::AccountId"
+                    MasterSnsArn: !Ref EventSnsTopic
+                    MasterKmsArn: !GetAtt SnsEncryptionKey.Arn
+                    Region: !Ref "AWS::Region"
+                    LogLevel: !Ref LogLevel
+
+    ActionServiceLambda:
+        Type: AWS::Lambda::Function
+        Properties:
+            Description: "The action microservice for Operations Conductor"
+            Code:
+                S3Bucket: !Join ["-", [!FindInMap ["SourceCode", "General", "S3Bucket"], !Ref "AWS::Region"]]
+                S3Key: !Join ["/", [!FindInMap ["SourceCode", "General", "KeyPrefix"],  "operations-conductor-services.zip"]]
+            Handler: actions/index.handler
+            Role: !GetAtt ActionServiceRole.Arn
+            Runtime: nodejs10.x
+            MemorySize: 128
+            Timeout: 15
+            Environment:
+                Variables:
+                    FilterTagKey: !Ref DocumentTagKey
+                    FilterTagValue: !Ref DocumentTagValue
+                    LogLevel: !Ref LogLevel
+
+    ConsumerLambda:
+        Type: AWS::Lambda::Function
+        Properties:
+            Description: "Reads messages off the Resource Queue and starts SSM Automation Documents to handle them"
+            Code:
+                S3Bucket: !Join ["-", [!FindInMap ["SourceCode", "General", "S3Bucket"], !Ref "AWS::Region"]]
+                S3Key: !Join ["/", [!FindInMap ["SourceCode", "General", "KeyPrefix"],  "operations-conductor-services.zip"]]
+            Handler: queue-consumer/index.handler
+            Role: !GetAtt ConsumerLambdaExecutionRole.Arn
+            Runtime: nodejs10.x
+            Timeout: 15
+            MemorySize: 128
+            Environment:
+                Variables:
+                    LogLevel: !Ref LogLevel
+
+    ResourceSelectorLambda:
+        Type: AWS::Lambda::Function
+        Properties:
+            Description: "Invoked by the Operations Conductor CloudWatch events. This function will compile a list of all resources that need to be acted on and add a message to the Resource Queue for each of them"
+            Code:
+                S3Bucket: !Join ["-", [!FindInMap ["SourceCode", "General", "S3Bucket"], !Ref "AWS::Region"]]
+                S3Key: !Join ["/", [!FindInMap ["SourceCode", "General", "KeyPrefix"],  "operations-conductor-services.zip"]]
+            Handler: resource-selector/index.handler
+            Role: !GetAtt ResourceSelectorExecutionRole.Arn
+            Runtime: nodejs10.x
+            Timeout: 15
+            MemorySize: 128
+            Environment:
+                Variables:
+                    TaskExecutionsTableName: !Ref TaskExecutionsTable
+                    ResourceQueueUrl: !Ref ResourceQueue
+                    SendAnonymousUsageData: !FindInMap ["Send", "AnonymousUsage", "Data"]
+                    SolutionId: !FindInMap ["Solution", "Data", "Id"]
+                    SolutionVersion: !FindInMap ["Solution", "Data", "Version"]
+                    SolutionUuid: !GetAtt CustomResourceAppUuid.UUID
+                    LogLevel: !Ref LogLevel
+
+    # Cognito UserPool
+    UserPool:
+        Type: AWS::Cognito::UserPool
+        Properties:
+            UserPoolName: "operations-conductor-userpool"
+            AdminCreateUserConfig:
+                AllowAdminCreateUserOnly: True
+                InviteMessageTemplate:
+                    EmailMessage:
+                        !Sub |
+                            <p>
+                                You are invited to join the Operations Conductor console. Your temporary password is as follows:
+                            </p>
+                            <p>
+                                E-Mail: <strong>{username}</strong><br />
+                                Password: <strong>{####}</strong>
+                            </p>
+                            <p>
+                                Please sign in to the Operations Conductor console with your Username (E-Mail) and temporary password provided above at:<br />
+                                https://${WebsiteDistribution.DomainName}
+                            </p>
+                    EmailSubject: "Your Operations Conductor Solution login"
+                UnusedAccountValidityDays: 7
+            AutoVerifiedAttributes:
+                - email
+            EmailVerificationSubject: "Your Operations Conductor Solution console verification code"
+            EmailVerificationMessage:
+                !Sub |
+                    <p>
+                        Your Operations Conductor Solution verification code is <strong>{####}</strong>.
+                    </p>
+            Policies:
+                PasswordPolicy:
+                        MinimumLength: 8
+                        RequireLowercase: True
+                        RequireNumbers: True
+                        RequireSymbols: True
+                        RequireUppercase: True
+
+    # When CFN UserPoolClient supports PreventUserExistenceErrors parameter, below UserPoolClient can be active.
+    # UserPoolClient:
+    #     Type: AWS::Cognito::UserPoolClient
+    #     Properties:
+    #         ClientName: "operations-conductor-app"
+    #         RefreshTokenValidity: 1
+    #         GenerateSecret: False
+    #         UserPoolId: !Ref UserPool
+    #         PreventUserExistenceErrors: "ENABLED"
+
+    UserPoolAdminGroup:
+        Type: AWS::Cognito::UserPoolGroup
+        Properties:
+            Description: "Administrator group for managing Operations Conductor"
+            GroupName: "Admin"
+            UserPoolId: !Ref UserPool
+
+    UserPoolMemberGroup:
+        Type: AWS::Cognito::UserPoolGroup
+        Properties:
+            Description: "Member group for Operations Conductor"
+            GroupName: "Member"
+            UserPoolId: !Ref UserPool
+
+    AdminUser:
+        Type: AWS::Cognito::UserPoolUser
+        Properties:
+            DesiredDeliveryMediums:
+                - EMAIL
+            ForceAliasCreation: True
+            UserAttributes:
+                -
+                    Name: email
+                    Value: !Ref AdministratorEmail
+                -
+                    Name: nickname
+                    Value: !Ref AdministratorName
+                -
+                    Name: email_verified
+                    Value: True
+            Username: !Ref AdministratorEmail
+            UserPoolId: !Ref UserPool
+
+    AdminGroupAssignment:
+        Type: AWS::Cognito::UserPoolUserToGroupAttachment
+        Properties:
+            GroupName: !Ref UserPoolAdminGroup
+            Username: !Ref AdminUser
+            UserPoolId: !Ref UserPool
+
+    # S3
+    WebsiteBucket:
+        Type: AWS::S3::Bucket
+        DeletionPolicy: Retain
+        Properties:
+            PublicAccessBlockConfiguration:
+                BlockPublicAcls: True
+                BlockPublicPolicy: True
+                IgnorePublicAcls: True
+                RestrictPublicBuckets: True
+        Metadata:
+            cfn_nag:
+                rules_to_suppress:
+                    -
+                        id: W35
+                        reason: "WebSiteBucket validated and does not require access logging to be configured."
+                    -
+                        id: W41
+                        reason: "WebSiteBucket serves only website assests that will be made available publicly."
+
+    WebsiteBucketPolicy:
+        Type: AWS::S3::BucketPolicy
+        Properties:
+            Bucket:
+                !Ref WebsiteBucket
+            PolicyDocument:
+                Statement:
+                    -
+                        Action:
+                            - "s3:GetObject"
+                        Effect: "Allow"
+                        Resource:
+                            - !Join ["/", [!GetAtt WebsiteBucket.Arn, "*"]]
+                        Principal:
+                            CanonicalUser: !GetAtt WebsiteOriginAccessIdentity.S3CanonicalUserId
+
+    CloudFormationBucket:
+        Type: AWS::S3::Bucket
+        DeletionPolicy: Retain
+        Properties:
+            PublicAccessBlockConfiguration:
+                BlockPublicAcls: True
+                BlockPublicPolicy: True
+                IgnorePublicAcls: True
+                RestrictPublicBuckets: True
+            BucketEncryption:
+                ServerSideEncryptionConfiguration:
+                    -
+                        ServerSideEncryptionByDefault:
+                            SSEAlgorithm: AES256
+        Metadata:
+            cfn_nag:
+                rules_to_suppress:
+                    -
+                        id: W35
+                        reason: "CloudFormationBucket validated and does not require access logging to be configured."
+
+    CloudFormationBucketPolicy:
+        Type: AWS::S3::BucketPolicy
+        Properties:
+            Bucket:
+                !Ref CloudFormationBucket
+            PolicyDocument:
+                Statement:
+                    -
+                        Sid: "default"
+                        Action:
+                            - "s3:ListBucket"
+                            - "s3:GetObject"
+                            - "s3:PutObject"
+                            - "s3:DeleteObject"
+                            - "s3:GetBucketPolicy"
+                            - "s3:PutBucketPolicy"
+                            - "s3:DeleteBucketPolicy"
+                        Effect: "Allow"
+                        Resource:
+                            - !GetAtt CloudFormationBucket.Arn
+                            - !Join ["/", [!GetAtt CloudFormationBucket.Arn, "*"]]
+                        Principal:
+                            AWS: !GetAtt TaskServiceRole.Arn
+
+    # CloudFront
+    WebsiteDistribution:
+        Type: AWS::CloudFront::Distribution
+        Properties:
+            DistributionConfig:
+                Comment: "Website distribution for Operations Conductor"
+                Origins:
+                    -
+                        Id: S3-operations-conductor
+                        DomainName:  !Sub ${WebsiteBucket}.s3.${AWS::Region}.amazonaws.com
+                        S3OriginConfig:
+                            OriginAccessIdentity: !Sub "origin-access-identity/cloudfront/${WebsiteOriginAccessIdentity}"
+                DefaultCacheBehavior:
+                    TargetOriginId: S3-operations-conductor
+                    AllowedMethods:
+                        - GET
+                        - HEAD
+                        - OPTIONS
+                    CachedMethods:
+                        - GET
+                        - HEAD
+                        - OPTIONS
+                    ForwardedValues:
+                        QueryString: false
+                    ViewerProtocolPolicy: "redirect-to-https"
+                    LambdaFunctionAssociations:
+                        -
+                            EventType: origin-response
+                            LambdaFunctionARN: !GetAtt CustomResourceCreateLambdaEdge.FunctionArn
+                DefaultRootObject: "index.html"
+                CustomErrorResponses:
+                   - ErrorCode: 404
+                     ResponsePagePath: "/index.html"
+                     ResponseCode: 200
+                   - ErrorCode: 403
+                     ResponsePagePath: "/index.html"
+                     ResponseCode: 200
+                IPV6Enabled: true
+                ViewerCertificate:
+                    CloudFrontDefaultCertificate: true
+                Enabled: true
+                HttpVersion: "http2"
+        Metadata:
+            cfn_nag:
+                rules_to_suppress:
+                    -
+                        id: W10
+                        reason: "This solution does not require CloudFront distribution access logging."
+
+    WebsiteOriginAccessIdentity:
+        Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+        Properties:
+            CloudFrontOriginAccessIdentityConfig:
+                Comment: !Sub "access-identity-${WebsiteBucket}"
+
+    # DynamoDB
+    TasksTable:
+        Type: AWS::DynamoDB::Table
+        DeletionPolicy: Delete
+        Properties:
+            BillingMode: "PAY_PER_REQUEST"
+            AttributeDefinitions:
+                -
+                    AttributeName: "taskId"
+                    AttributeType: "S"
+            KeySchema:
+                -
+                    AttributeName: "taskId"
+                    KeyType: "HASH"
+            SSESpecification:
+                SSEEnabled: true
+
+    TaskExecutionsTable:
+        Type: AWS::DynamoDB::Table
+        DeletionPolicy: Delete
+        Properties:
+            BillingMode: "PAY_PER_REQUEST"
+            AttributeDefinitions:
+                -
+                    AttributeName: "taskId"
+                    AttributeType: "S"
+                -
+                    AttributeName: "parentExecutionId"
+                    AttributeType: "S"
+                -
+                    AttributeName: "startTime"
+                    AttributeType: "S"
+            KeySchema:
+                -
+                    AttributeName: "taskId"
+                    KeyType: "HASH"
+                -
+                    AttributeName: "parentExecutionId"
+                    KeyType: "RANGE"
+            GlobalSecondaryIndexes:
+                -
+                    IndexName: "taskId-startTime-index"
+                    KeySchema:
+                        -
+                            AttributeName: "taskId"
+                            KeyType: "HASH"
+                        -
+                            AttributeName: "startTime"
+                            KeyType: "RANGE"
+                    Projection:
+                        ProjectionType: "ALL"
+            SSESpecification:
+                SSEEnabled: true
+
+    AutomationExecutionsTable:
+        Type: AWS::DynamoDB::Table
+        DeletionPolicy: Delete
+        Properties:
+            BillingMode: "PAY_PER_REQUEST"
+            AttributeDefinitions:
+                -
+                    AttributeName: "parentExecutionId"
+                    AttributeType: "S"
+                -
+                    AttributeName: "automationExecutionId"
+                    AttributeType: "S"
+            KeySchema:
+                -
+                    AttributeName: "parentExecutionId"
+                    KeyType: "HASH"
+                -
+                    AttributeName: "automationExecutionId"
+                    KeyType: "RANGE"
+            SSESpecification:
+                SSEEnabled: true
+
+    # SQS
+    DeadLetterQueue:
+        Type: AWS::SQS::Queue
+        Properties: {
+            "KmsMasterKeyId": "alias/aws/sqs",
+            "MessageRetentionPeriod": 1209600,
+            "VisibilityTimeout": 60
+        }
+
+    ResourceQueue:
+        Type: AWS::SQS::Queue
+        Properties: {
+            "KmsMasterKeyId": "alias/aws/sqs",
+            "MessageRetentionPeriod": 1209600,
+            "VisibilityTimeout": 60,
+            "RedrivePolicy": {
+                "deadLetterTargetArn": !GetAtt DeadLetterQueue.Arn,
+                "maxReceiveCount": 50
+            }
+        }
+
+    # CloudWatch
+    CloudWatchResourceQueueConsumeRule:
+        Type: AWS::Events::Rule
+        Properties:
+            Description: "Rule to invoke the Operations Conductor Resource Queue Consumer Lambda on a set interval"
+            ScheduleExpression: "rate(1 minute)"
+            State: "ENABLED"
+            Targets:
+                -   Arn: !GetAtt ConsumerLambda.Arn
+                    Id: "TargetFunction"
+                    Input: !Join [ "", [ "{ \"QueueUrl\": \"", !Ref ResourceQueue, "\" }" ]]
+
+    CloudWatchResourceQueueConsumeRuleInvokeLambdaPermission:
+        Type: AWS::Lambda::Permission
+        Properties:
+            FunctionName: !GetAtt ConsumerLambda.Arn
+            Action: "lambda:InvokeFunction"
+            Principal: "events.amazonaws.com"
+            SourceArn: !GetAtt CloudWatchResourceQueueConsumeRule.Arn
+
+    # KMS
+    SnsEncryptionKey:
+        Type: AWS::KMS::Key
+        Properties:
+            Description: Key for Event SNS
+            Enabled: true
+            EnableKeyRotation: true
+            KeyPolicy:
+                Statement:
+                    -
+                        Sid: "default"
+                        Effect: "Allow"
+                        Principal:
+                            AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+                        Action:
+                            - "kms:*"
+                        Resource:
+                            - "*"
+
+    SnsEncryptionKeyAlias:
+        Type: AWS::KMS::Alias
+        Properties:
+            AliasName: alias/opsco-sns-encryption-key
+            TargetKeyId: !Ref SnsEncryptionKey
+
+    # SNS
+    EventSnsTopic:
+        Type: AWS::SNS::Topic
+        Properties:
+            KmsMasterKeyId: !Ref SnsEncryptionKey
+            Subscription:
+                -
+                    Endpoint: !GetAtt ResourceSelectorLambda.Arn
+                    Protocol: "lambda"
+
+    EventSnsTopicPolicy:
+        Type: AWS::SNS::TopicPolicy
+        Properties:
+            Topics:
+                - !Ref EventSnsTopic
+            PolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                    -
+                        Sid: "default"
+                        Effect: "Allow"
+                        Principal:
+                            AWS:
+                                - "*"
+                        Action:
+                            - "sns:RemovePermission"
+                            - "sns:SetTopicAttributes"
+                            - "sns:DeleteTopic"
+                            - "sns:ListSubscriptionsByTopic"
+                            - "sns:GetTopicAttributes"
+                            - "sns:Receive"
+                            - "sns:AddPermission"
+                            - "sns:Subscribe"
+                        Resource:
+                            - !Ref EventSnsTopic
+                        Condition:
+                            StringEquals:
+                                AWS:SourceOwner: !Ref "AWS::AccountId"
+        Metadata:
+            cfn_nag:
+                rules_to_suppress:
+                    -
+                        id: F18
+                        reason: "The * permission has condition to block except the master account."
+
+Outputs:
+    SolutionUUID:
+        Description: "Solution UUID"
+        Value: !GetAtt CustomResourceAppUuid.UUID
+    ApiGatewayEndpoint:
+        Description: "Operations Conductor API Endpoint"
+        Value: !Sub "https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod"
+    CognitoUserPool:
+        Description: "Cognito User Pool ID"
+        Value: !Ref UserPool
+    CognitoUserPoolClient:
+        Description: "Cognito User Pool Client ID"
+        Value: !GetAtt CustomResourceCreateUserPoolClient.ClientId
+    WebsiteConsole:
+        Description: "Operations Conductor Web Console"
+        Value: !Sub https://${WebsiteDistribution.DomainName}
+    TasksTableName:
+        Description: "Tasks DynamoDB Table"
+        Value: !Ref TasksTable
+    TaskExecutionsTableName:
+        Description: "Task Executions DynamoDB Table"
+        Value: !Ref TaskExecutionsTable
+    AutomationExecutionsTableName:
+        Description: "Automation Executions DynamoDB Table"
+        Value: !Ref AutomationExecutionsTable
+    OperationsConductorSharedRoleArn:
+        Description: "The role that will be assumed when Systems Manager executes Operations Conductor Automation documents"
+        Value: !GetAtt OperationsConductorSharedRole.Arn
+    ResourceQueueUrl:
+        Description: "The SQS Queue that will hold messages describing Operations Conductor actions that need to be performed"
+        Value: !Ref ResourceQueue
+    ResourceSelectorExecutionRoleArn:
+        Description: "ARN for the Role for Operations Conductor's Lambda function to identify which resources need to be acted on for a given Task"
+        Value: !GetAtt ResourceSelectorExecutionRole.Arn
+    CloudFormationBucket:
+        Description: "S3 Bucket for storing CloudFormation templates for Operations Conductor Tasks"
+        Value: !Ref CloudFormationBucket

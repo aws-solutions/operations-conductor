@@ -1,0 +1,297 @@
+---
+description: "(Operations Conductor) Deletes EBS Volume Snapshots according to the configured retention policy"
+schemaVersion: "0.3"
+
+assumeRole: "%%OperationsConductorSharedRoleArn%%"
+
+parameters:
+  SQSMsgBody:
+    type: "String"
+    description: "JSON Stringified version of the message body that was read off the Resource Queue"
+  SQSMsgReceiptHandle:
+    type: "String"
+    description: "Receipt handle of the SQS message that was read off the queue"
+  TargetResourceType:
+    type: "String"
+    description: "The AWS resource type for which this automation applies. The format of this value should be: service:resourceType"
+    default: "ec2:volume"
+  RetentionCount:
+    type: "String"
+    description: "(Optional) Number of snapshots to keep for the volume. Either RetentionCount or RetentionDays should be supplied; not both"
+    default: ""
+  RetentionDays:
+    type: "String"
+    description: "(Optional) Number of days to keep snapshots for the volume. Either RetentionCount or RetentionDays should be supplied; not both"
+    default: ""
+
+mainSteps:
+-   name: "VALIDATE_MSG_CONTENTS"
+    action: aws:executeScript
+    timeoutSeconds: 30
+    description: "Validates contents of the message from the Resource Queue and parses out parameters"
+    inputs:
+      Runtime: python3.6
+      Handler: script_handler
+      InputPayload:
+        SQSMsgBody: "{{ SQSMsgBody }}"
+        RetentionCount: "{{ RetentionCount }}"
+        RetentionDays: "{{ RetentionDays }}"
+      Script: |-
+        import json
+        def script_handler(events, context):
+          output = { "statusCode": 200 }
+          sqs_msg_body = json.loads(events['SQSMsgBody'])
+
+          if "ResourceId" not in sqs_msg_body:
+            raise Exception("ResourceId was not found in the SQS Message Body.")
+
+          output["resource_id"] = sqs_msg_body["ResourceId"]
+
+          if "ResourceRegion" not in sqs_msg_body:
+            raise Exception("ResourceRegion was not found in the SQS Message Body.")
+          output["source_region"] = sqs_msg_body["ResourceRegion"]
+
+          if "ResourceAccount" not in sqs_msg_body:
+            raise Exception("ResourceAccount was not found in the SQS Message Body.")
+          output["source_account_id"] = sqs_msg_body["ResourceAccount"]
+
+          if "TargetTag" not in sqs_msg_body:
+            raise Exception("TargetTag was not found in the SQS Message Body.")
+          output["target_tag_name"] = sqs_msg_body["TargetTag"]
+
+          if "TaskId" not in sqs_msg_body:
+            raise Exception("TaskId was not found in the SQS Message Body.")
+          output["task_id"] = sqs_msg_body["TaskId"]
+
+          if "ParentExecutionId" not in sqs_msg_body:
+            raise Exception("ParentExecutionId was not found in the SQS Message Body.")
+          output["parent_execution_id"] = sqs_msg_body["ParentExecutionId"]
+
+          if "TaskName" not in sqs_msg_body:
+            raise Exception("TaskName was not found in the SQS Message Body.")
+          output["task_name"] = sqs_msg_body["TaskName"]
+
+          if "StartTime" not in sqs_msg_body:
+            raise Exception("StartTime was not found in the SQS Message Body.")
+          output["start_time"] = sqs_msg_body["StartTime"]
+
+          if events["RetentionCount"].strip() == "" and events["RetentionDays"].strip() == "":
+            raise Exception("Neither 'RetentionCount' nor 'RetentionDays' was supplied a value. A value for one is required but both cannot be set.")
+
+          if events["RetentionCount"].strip() != "" and events["RetentionDays"].strip() != "":
+            raise Exception("It's not possible to set values for 'RetentionCount' and 'RetentionDays'. Only one is accepted.")
+
+          return output
+    outputs:
+    - Name: "resource_id"
+      Selector: "$.Payload.resource_id"
+      Type: "String"
+    - Name: "source_region"
+      Selector: "$.Payload.source_region"
+      Type: "String"
+    - Name: "source_account_id"
+      Selector: "$.Payload.source_account_id"
+      Type: "String"
+    - Name: "target_tag_name"
+      Selector: "$.Payload.target_tag_name"
+      Type: "String"
+    - Name: "task_id"
+      Selector: "$.Payload.task_id"
+      Type: "String"
+    - Name: "parent_execution_id"
+      Selector: "$.Payload.parent_execution_id"
+      Type: "String"
+    - Name: "task_name"
+      Selector: "$.Payload.task_name"
+      Type: "String"
+    - Name: "start_time"
+      Selector: "$.Payload.start_time"
+      Type: "String"
+-   name: "CREATE_AUTOMATION_EXECUTION_RECORD"
+    action: aws:executeAwsApi
+    timeoutSeconds: 30
+    description: "Creates a record of this automation execution in the Operations Conductor Automation Executions Table"
+    inputs: {
+      "Service": "dynamodb",
+      "Api": "PutItem",
+      "TableName": "%%AutomationExecutionsTableName%%",
+      "Item": {
+        "parentExecutionId": { "S": "{{ VALIDATE_MSG_CONTENTS.parent_execution_id }}" },
+        "automationExecutionId": { "S": "{{ automation:EXECUTION_ID }}" },
+        "status": { "S": "InProgress" }
+      }
+    }
+-   name: "PERFORM_ACTION_ON_RESOURCE"
+    action: aws:executeScript
+    timeoutSeconds: 30
+    description: "Deletes Snapshot(s) based on the supplied retention policy"
+    inputs:
+      Runtime: python3.6
+      Handler: script_handler
+      InputPayload:
+        task_id: "{{ VALIDATE_MSG_CONTENTS.task_id }}"
+        source_account_id: "{{ VALIDATE_MSG_CONTENTS.source_account_id }}"
+        source_region: "{{ VALIDATE_MSG_CONTENTS.source_region }}"
+        resource_id: "{{ VALIDATE_MSG_CONTENTS.resource_id }}"
+        target_tag_name: "{{ VALIDATE_MSG_CONTENTS.target_tag_name }}"
+        RetentionCount: "{{ RetentionCount }}"
+        RetentionDays: "{{ RetentionDays }}"
+      Script: |-
+        import boto3
+        import json
+        from datetime import datetime, timedelta, timezone
+        def script_handler(events, context):
+          task_id = events["task_id"]
+          source_account_id = events["source_account_id"]
+          source_region = events["source_region"]
+
+          # Assume role in source account
+          sts_connection = boto3.client('sts')
+          assumed_role = sts_connection.assume_role(
+              RoleArn=f"arn:aws:iam::{source_account_id}:role/{source_account_id}-{source_region}-{task_id}",
+              RoleSessionName="ops_conductor_delete_snapshot"
+          )
+
+          # Look up the Volume by ID and make sure it is still tagged correctly
+          ec2_client = boto3.client(
+            'ec2',
+            region_name=source_region,
+            aws_access_key_id=assumed_role['Credentials']['AccessKeyId'],
+            aws_secret_access_key=assumed_role['Credentials']['SecretAccessKey'],
+            aws_session_token=assumed_role['Credentials']['SessionToken']
+          )
+
+          desc_volumes_response = ec2_client.describe_volumes(VolumeIds=[events["resource_id"]])
+
+          if len(desc_volumes_response["Volumes"]) == 0:
+            raise Exception(f"Volume ({ events['resource_id'] }) was not found")
+          elif len(desc_volumes_response["Volumes"]) > 1:
+            raise Exception(f"More than one volume was returned when looking for Volume ID { events['resource_id'] }")
+
+          tag_found = False
+          for tag in desc_volumes_response["Volumes"][0]["Tags"]:
+            if tag["Key"] == events["target_tag_name"]:
+              tag_found = True
+              break
+
+          if not tag_found:
+            raise Exception(f"Volume ({ events['resource_id'] }) was found but it was not tagged with {events['target_tag_name']}.")
+
+          # Find the Snapshots for the supplied Volume
+          snapshots_filter_by_volume_id = [
+            {
+              "Name": "volume-id",
+              "Values": [events["resource_id"]]
+            }
+          ]
+
+          response = ec2_client.describe_snapshots(Filters=snapshots_filter_by_volume_id)
+          snapshots = response['Snapshots']
+
+          if len(snapshots) == 0:
+            print(f"No Snapshots were found for Volume ({ events['resource_id'] }). Exiting.")
+            return { "statusCode": 200 }
+
+          snapshot_ids_to_delete = []
+
+          if events["RetentionCount"].strip() != "":
+            retention_count = int(events["RetentionCount"].strip())
+            if len(snapshots) > retention_count:
+              print(f"Keeping only the { retention_count } most recent snapshot(s)")
+              # Make sure the list of snapshots is sorted so that the youngest snapshots are in the front
+              snapshots.sort(key=lambda s: s["StartTime"], reverse=True)
+
+              # Remove snapshots from the beginning of the list as they are the youngest and should be retained
+              del snapshots[:retention_count]
+
+              # Add the remaining (older) snapshot IDs to the delete list
+              for s in snapshots:
+                snapshot_ids_to_delete.append(s["SnapshotId"])
+          elif events["RetentionDays"].strip() != "":
+            retention_days = int(events["RetentionDays"].strip())
+
+            # Check each snapshot to see if it's older than the retention days.
+            # If so, add its ID to the list of snapshot IDs to be deleted
+            date_cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+            print(f"Going to delete snapshots older than {date_cutoff}")
+            for s in snapshots:
+              if s["StartTime"] < date_cutoff:
+                snapshot_ids_to_delete.append(s["SnapshotId"])
+
+          print(f"Found {len(snapshot_ids_to_delete)} snapshot(s) to delete")
+
+          if len(snapshot_ids_to_delete) > 0:
+            for snapshot_id in snapshot_ids_to_delete:
+              ec2_client.delete_snapshot(SnapshotId=snapshot_id)
+            print("Successfully deleted snapshot(s)")
+
+          return { "statusCode": 200 }
+-   name: "REMOVE_MSG_FROM_RESOURCE_QUEUE"
+    action: "aws:executeAwsApi"
+    inputs: {
+      "Service": "sqs",
+      "Api": "DeleteMessage",
+      "QueueUrl": "%%ResourceQueueUrl%%",
+      "ReceiptHandle": "{{ SQSMsgReceiptHandle }}"
+    }
+-   name: "UPDATE_AUTOMATION_EXECUTION_RECORD"
+    action: aws:executeAwsApi
+    timeoutSeconds: 30
+    description: "Updates the record of this automation execution in the Operations Conductor Automation Executions Table to mark it as successfully completed"
+    inputs: {
+      "Service": "dynamodb",
+      "Api": "UpdateItem",
+      "TableName": "%%AutomationExecutionsTableName%%",
+      "Key": {
+        "parentExecutionId": { "S": "{{ VALIDATE_MSG_CONTENTS.parent_execution_id }}" },
+        "automationExecutionId": { "S": "{{ automation:EXECUTION_ID }}" }
+      },
+      "UpdateExpression": "SET #stat = :val1",
+      "ExpressionAttributeNames": {
+        "#stat": "status"
+      },
+      "ExpressionAttributeValues": {
+        ":val1": { "S": "Success" }
+      }
+    }
+-   name: "UPDATE_TASK_EXECUTIONS_RECORD"
+    action: aws:executeAwsApi
+    timeoutSeconds: 30
+    description: "Updates the record for the overall execution of the Operations Conductor Task that spawned this automation"
+    inputs: {
+      "Service": "dynamodb",
+      "Api": "UpdateItem",
+      "TableName": "%%TaskExecutionsTableName%%",
+      "Key": {
+        "taskId": { "S": "{{ VALIDATE_MSG_CONTENTS.task_id }}" },
+        "parentExecutionId": { "S": "{{ VALIDATE_MSG_CONTENTS.parent_execution_id }}" }
+      },
+      "UpdateExpression": "SET completedResourceCount = completedResourceCount + :incr, lastUpdateTime = :uptime",
+      "ExpressionAttributeValues": {
+        ":incr": { "N": "1" },
+        ":uptime": { "S": "{{ global:DATE_TIME }}" }
+      }
+    }
+-   name: "CHECK_FOR_TASK_EXECUTION_COMPLETION"
+    action: aws:executeAwsApi
+    timeoutSeconds: 30
+    description: "Marks the overall task execution as Success if all resources have been successfully acted on"
+    inputs: {
+      "Service": "dynamodb",
+      "Api": "UpdateItem",
+      "TableName": "%%TaskExecutionsTableName%%",
+      "Key": {
+        "taskId": { "S": "{{ VALIDATE_MSG_CONTENTS.task_id }}" },
+        "parentExecutionId": { "S": "{{ VALIDATE_MSG_CONTENTS.parent_execution_id }}" }
+      },
+      "UpdateExpression": "SET #s = :stat",
+      "ConditionExpression": "completedResourceCount = totalResourceCount",
+      "ExpressionAttributeNames": {
+        "#s": "status"
+      },
+      "ExpressionAttributeValues": {
+        ":stat": { "S": "Success" }
+      }
+    }
+    onFailure: Continue
+    isEnd: true

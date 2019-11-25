@@ -1,0 +1,28 @@
+{
+    "compilerOptions": {
+        "target": "es6",
+        "module": "commonjs",
+        "outDir": "build",
+        "emitDecoratorMetadata": true,
+        "experimentalDecorators": true,
+        "rootDir": ".",
+        "sourceMap": true
+    },
+    "include": [
+        "*.ts",
+        "actions/*.ts",
+        "common/*.ts",
+        "custom-resource/*.ts",
+        "custom-resource/ssm/*.ts",
+        "logger/*.ts",
+        "metrics/*.ts",
+        "queue-consumer/*.ts",
+        "resource-selector/*.ts",
+        "tasks/*.ts",
+        "users/*.ts"
+    ],
+    "exclude": [
+        "node_modules",
+        "*.spec.ts"
+    ]
+}

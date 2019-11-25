@@ -1,0 +1,821 @@
+---
+description: "(Operations Conductor) Resizes an EC2 instance with a new hardware type in the same family"
+schemaVersion: "0.3"
+
+assumeRole: "%%OperationsConductorSharedRoleArn%%"
+
+parameters:
+  SQSMsgBody:
+    type: "String"
+    description: "JSON Stringified version of the message body that was read off the Resource Queue"
+  SQSMsgReceiptHandle:
+    type: "String"
+    description: "Receipt handle of the SQS message that was read off the queue"
+  TargetResourceType:
+    type: "String"
+    description: "The AWS resource type for which this automation applies. The format of this value should be: service:resourceType"
+    default: "ec2:instance"
+  TargetEC2InstanceTypeList:
+    type: "String"
+    description: "(Required) A comma-separated list of instance types within the same family. The instances should be in increasing order of size (smallest instance type should be the first item in the list)"
+    default: ""
+  CPUUtilizationLowThreshold:
+    type: "String"
+    description: "(Required) An integer between 1 and 100. If the average CPU utilization goes below this threshold, the instance will be resized down"
+    default: ""
+  CPUUtilizationHighThreshold:
+    type: "String"
+    description: "(Required) An integer between 1 and 100. If the average CPU utilization goes above this threshold, the instance will be resized up"
+    default: ""
+
+mainSteps:
+-   name: "VALIDATE_MSG_CONTENTS"
+    action: aws:executeScript
+    timeoutSeconds: 30
+    description: "Validates contents of the message from the Resource Queue and parses out parameters"
+    inputs:
+      Runtime: python3.6
+      Handler: script_handler
+      InputPayload:
+        SQSMsgBody: "{{ SQSMsgBody }}"
+        TargetEC2InstanceTypeList: "{{ TargetEC2InstanceTypeList }}"
+        CPUUtilizationLowThreshold: "{{ CPUUtilizationLowThreshold }}"
+        CPUUtilizationHighThreshold: "{{ CPUUtilizationHighThreshold }}"
+      Script: |-
+        import boto3
+        import json
+        def script_handler(events, context):
+          output = { "statusCode": 200 }
+          sqs_msg_body = json.loads(events["SQSMsgBody"])
+
+          instance_type_map = {
+            "a1.medium": "GENERAL_PURPOSE",
+            "a1.large": "GENERAL_PURPOSE",
+            "a1.xlarge": "GENERAL_PURPOSE",
+            "a1.2xlarge": "GENERAL_PURPOSE",
+            "a1.4xlarge": "GENERAL_PURPOSE",
+            "t3.nano": "GENERAL_PURPOSE",
+            "t3.micro": "GENERAL_PURPOSE",
+            "t3.small": "GENERAL_PURPOSE",
+            "t3.medium": "GENERAL_PURPOSE",
+            "t3.large": "GENERAL_PURPOSE",
+            "t3.xlarge": "GENERAL_PURPOSE",
+            "t3.2xlarge": "GENERAL_PURPOSE",
+            "t3a.nano": "GENERAL_PURPOSE",
+            "t3a.micro": "GENERAL_PURPOSE",
+            "t3a.small": "GENERAL_PURPOSE",
+            "t3a.medium": "GENERAL_PURPOSE",
+            "t3a.large": "GENERAL_PURPOSE",
+            "t3a.xlarge": "GENERAL_PURPOSE",
+            "t3a.2xlarge": "GENERAL_PURPOSE",
+            "t2.nano": "GENERAL_PURPOSE",
+            "t2.micro": "GENERAL_PURPOSE",
+            "t2.small": "GENERAL_PURPOSE",
+            "t2.medium": "GENERAL_PURPOSE",
+            "t2.large": "GENERAL_PURPOSE",
+            "t2.xlarge": "GENERAL_PURPOSE",
+            "t2.2xlarge": "GENERAL_PURPOSE",
+            "m5.large": "GENERAL_PURPOSE",
+            "m5.xlarge": "GENERAL_PURPOSE",
+            "m5.2xlarge": "GENERAL_PURPOSE",
+            "m5.4xlarge": "GENERAL_PURPOSE",
+            "m5.8xlarge": "GENERAL_PURPOSE",
+            "m5.12xlarge": "GENERAL_PURPOSE",
+            "m5.16xlarge": "GENERAL_PURPOSE",
+            "m5.24xlarge": "GENERAL_PURPOSE",
+            "m5.metal": "GENERAL_PURPOSE",
+            "m5d.large": "GENERAL_PURPOSE",
+            "m5d.xlarge": "GENERAL_PURPOSE",
+            "m5d.2xlarge": "GENERAL_PURPOSE",
+            "m5d.4xlarge": "GENERAL_PURPOSE",
+            "m5d.8xlarge": "GENERAL_PURPOSE",
+            "m5d.12xlarge": "GENERAL_PURPOSE",
+            "m5d.16xlarge": "GENERAL_PURPOSE",
+            "m5d.24xlarge": "GENERAL_PURPOSE",
+            "m5d.metal": "GENERAL_PURPOSE",
+            "m5a.large": "GENERAL_PURPOSE",
+            "m5a.xlarge": "GENERAL_PURPOSE",
+            "m5a.2xlarge": "GENERAL_PURPOSE",
+            "m5a.4xlarge": "GENERAL_PURPOSE",
+            "m5a.8xlarge": "GENERAL_PURPOSE",
+            "m5a.12xlarge": "GENERAL_PURPOSE",
+            "m5a.16xlarge": "GENERAL_PURPOSE",
+            "m5a.24xlarge": "GENERAL_PURPOSE",
+            "m5ad.large": "GENERAL_PURPOSE",
+            "m5ad.xlarge": "GENERAL_PURPOSE",
+            "m5ad.2xlarge": "GENERAL_PURPOSE",
+            "m5ad.4xlarge": "GENERAL_PURPOSE",
+            "m5ad.12xlarge": "GENERAL_PURPOSE",
+            "m5ad.24xlarge": "GENERAL_PURPOSE",
+            "m4.large": "GENERAL_PURPOSE",
+            "m4.xlarge": "GENERAL_PURPOSE",
+            "m4.2xlarge": "GENERAL_PURPOSE",
+            "m4.4xlarge": "GENERAL_PURPOSE",
+            "m4.10xlarge": "GENERAL_PURPOSE",
+            "m4.16xlarge": "GENERAL_PURPOSE",
+            "c5.large": "COMPUTE_OPTIMIZED",
+            "c5.xlarge": "COMPUTE_OPTIMIZED",
+            "c5.2xlarge": "COMPUTE_OPTIMIZED",
+            "c5.4xlarge": "COMPUTE_OPTIMIZED",
+            "c5.9xlarge": "COMPUTE_OPTIMIZED",
+            "c5.12xlarge": "COMPUTE_OPTIMIZED",
+            "c5.18xlarge": "COMPUTE_OPTIMIZED",
+            "c5.24xlarge": "COMPUTE_OPTIMIZED",
+            "c5.metal": "COMPUTE_OPTIMIZED",
+            "c5d.large": "COMPUTE_OPTIMIZED",
+            "c5d.xlarge": "COMPUTE_OPTIMIZED",
+            "c5d.2xlarge": "COMPUTE_OPTIMIZED",
+            "c5d.4xlarge": "COMPUTE_OPTIMIZED",
+            "c5d.9xlarge": "COMPUTE_OPTIMIZED",
+            "c5d.18xlarge": "COMPUTE_OPTIMIZED",
+            "c5n.large": "COMPUTE_OPTIMIZED",
+            "c5n.xlarge": "COMPUTE_OPTIMIZED",
+            "c5n.2xlarge": "COMPUTE_OPTIMIZED",
+            "c5n.4xlarge": "COMPUTE_OPTIMIZED",
+            "c5n.9xlarge": "COMPUTE_OPTIMIZED",
+            "c5n.18xlarge": "COMPUTE_OPTIMIZED",
+            "c5n.metal": "COMPUTE_OPTIMIZED",
+            "c4.large": "COMPUTE_OPTIMIZED",
+            "c4.xlarge": "COMPUTE_OPTIMIZED",
+            "c4.2xlarge": "COMPUTE_OPTIMIZED",
+            "c4.4xlarge": "COMPUTE_OPTIMIZED",
+            "c4.8xlarge": "COMPUTE_OPTIMIZED",
+            "r5.large": "MEMORY_OPTIMIZED",
+            "r5.xlarge": "MEMORY_OPTIMIZED",
+            "r5.2xlarge": "MEMORY_OPTIMIZED",
+            "r5.4xlarge": "MEMORY_OPTIMIZED",
+            "r5.8xlarge": "MEMORY_OPTIMIZED",
+            "r5.12xlarge": "MEMORY_OPTIMIZED",
+            "r5.16xlarge": "MEMORY_OPTIMIZED",
+            "r5.24xlarge": "MEMORY_OPTIMIZED",
+            "r5.metal": "MEMORY_OPTIMIZED",
+            "r5d.large": "MEMORY_OPTIMIZED",
+            "r5d.xlarge": "MEMORY_OPTIMIZED",
+            "r5d.2xlarge": "MEMORY_OPTIMIZED",
+            "r5d.4xlarge": "MEMORY_OPTIMIZED",
+            "r5d.8xlarge": "MEMORY_OPTIMIZED",
+            "r5d.12xlarge": "MEMORY_OPTIMIZED",
+            "r5d.16xlarge": "MEMORY_OPTIMIZED",
+            "r5d.24xlarge": "MEMORY_OPTIMIZED",
+            "r5d.metal": "MEMORY_OPTIMIZED",
+            "r5a.large": "MEMORY_OPTIMIZED",
+            "r5a.xlarge": "MEMORY_OPTIMIZED",
+            "r5a.2xlarge": "MEMORY_OPTIMIZED",
+            "r5a.4xlarge": "MEMORY_OPTIMIZED",
+            "r5a.8xlarge": "MEMORY_OPTIMIZED",
+            "r5a.12xlarge": "MEMORY_OPTIMIZED",
+            "r5a.16xlarge": "MEMORY_OPTIMIZED",
+            "r5a.24.xlarge": "MEMORY_OPTIMIZED",
+            "r5ad.large": "MEMORY_OPTIMIZED",
+            "r5ad.xlarge": "MEMORY_OPTIMIZED",
+            "r5ad.2xlarge": "MEMORY_OPTIMIZED",
+            "r5ad.4xlarge": "MEMORY_OPTIMIZED",
+            "r5ad.12xlarge": "MEMORY_OPTIMIZED",
+            "r5ad.24.xlarge": "MEMORY_OPTIMIZED",
+            "r4.large": "MEMORY_OPTIMIZED",
+            "r4.xlarge": "MEMORY_OPTIMIZED",
+            "r4.2xlarge": "MEMORY_OPTIMIZED",
+            "r4.4xlarge": "MEMORY_OPTIMIZED",
+            "r4.8xlarge": "MEMORY_OPTIMIZED",
+            "r4.16xlarge": "MEMORY_OPTIMIZED",
+            "x1e.xlarge": "MEMORY_OPTIMIZED",
+            "x1e.2xlarge": "MEMORY_OPTIMIZED",
+            "x1e.4xlarge": "MEMORY_OPTIMIZED",
+            "x1e.8xlarge": "MEMORY_OPTIMIZED",
+            "x1e.16xlarge": "MEMORY_OPTIMIZED",
+            "x1e.32xlarge": "MEMORY_OPTIMIZED",
+            "x1.16xlarge": "MEMORY_OPTIMIZED",
+            "x1.32xlarge": "MEMORY_OPTIMIZED",
+            "u-6tb1.metal": "MEMORY_OPTIMIZED",
+            "u-9tb1.metal": "MEMORY_OPTIMIZED",
+            "u-12tb1.metal": "MEMORY_OPTIMIZED",
+            "z1d.large": "MEMORY_OPTIMIZED",
+            "z1d.xlarge": "MEMORY_OPTIMIZED",
+            "z1d.2xlarge": "MEMORY_OPTIMIZED",
+            "z1d.3xlarge": "MEMORY_OPTIMIZED",
+            "z1d.6xlarge": "MEMORY_OPTIMIZED",
+            "z1d.12xlarge": "MEMORY_OPTIMIZED",
+            "z1d.metal": "MEMORY_OPTIMIZED",
+            "p3.2xlarge": "ACCELERATED_COMPUTING",
+            "p3.8xlarge": "ACCELERATED_COMPUTING",
+            "p3.16xlarge": "ACCELERATED_COMPUTING",
+            "p3dn.24xlarge": "ACCELERATED_COMPUTING",
+            "p2.xlarge": "ACCELERATED_COMPUTING",
+            "p2.8xlarge": "ACCELERATED_COMPUTING",
+            "p2.16xlarge": "ACCELERATED_COMPUTING",
+            "g4dn.xlarge": "ACCELERATED_COMPUTING",
+            "g4dn.2xlarge": "ACCELERATED_COMPUTING",
+            "g4dn.4xlarge": "ACCELERATED_COMPUTING",
+            "g4dn.8xlarge": "ACCELERATED_COMPUTING",
+            "g4dn.16xlarge": "ACCELERATED_COMPUTING",
+            "g4dn.12xlarge": "ACCELERATED_COMPUTING",
+            "g4dn.metal": "ACCELERATED_COMPUTING",
+            "g3s.xlarge": "ACCELERATED_COMPUTING",
+            "g3.4xlarge": "ACCELERATED_COMPUTING",
+            "g3.8xlarge": "ACCELERATED_COMPUTING",
+            "g3.16xlarge": "ACCELERATED_COMPUTING",
+            "f1.2xlarge": "ACCELERATED_COMPUTING",
+            "f1.4xlarge": "ACCELERATED_COMPUTING",
+            "f1.16xlarge": "ACCELERATED_COMPUTING",
+            "i3.large": "STORAGE_OPTIMIZED",
+            "i3.xlarge": "STORAGE_OPTIMIZED",
+            "i3.2xlarge": "STORAGE_OPTIMIZED",
+            "i3.4xlarge": "STORAGE_OPTIMIZED",
+            "i3.8xlarge": "STORAGE_OPTIMIZED",
+            "i3.16xlarge": "STORAGE_OPTIMIZED",
+            "i3.metal": "STORAGE_OPTIMIZED",
+            "i3en.large": "STORAGE_OPTIMIZED",
+            "i3en.xlarge": "STORAGE_OPTIMIZED",
+            "i3en.2xlarge": "STORAGE_OPTIMIZED",
+            "i3en.3xlarge": "STORAGE_OPTIMIZED",
+            "i3en.6xlarge": "STORAGE_OPTIMIZED",
+            "i3en.12xlarge": "STORAGE_OPTIMIZED",
+            "i3en.24xlarge": "STORAGE_OPTIMIZED",
+            "i3en.metal": "STORAGE_OPTIMIZED",
+            "d2.xlarge": "STORAGE_OPTIMIZED",
+            "d2.2xlarge": "STORAGE_OPTIMIZED",
+            "d2.4xlarge": "STORAGE_OPTIMIZED",
+            "d2.8xlarge": "STORAGE_OPTIMIZED",
+            "h1.2xlarge": "STORAGE_OPTIMIZED",
+            "h1.4xlarge": "STORAGE_OPTIMIZED",
+            "h1.8xlarge": "STORAGE_OPTIMIZED",
+            "h1.16xlarge": "STORAGE_OPTIMIZED"
+          }
+
+          # Create default values for all output parameters
+          output["resource_id"] = ""
+          output["source_region"] = ""
+          output["source_account_id"] = ""
+          output["target_tag_name"] = ""
+          output["parent_execution_id"] = ""
+          output["target_ec2_instance_types"] = ""
+          output["cpu_utilization_high_threshold"] = ""
+          output["cpu_utilization_low_threshold"] = ""
+
+          if events["TargetEC2InstanceTypeList"].strip() == "":
+            raise Exception("TargetEC2InstanceTypeList was not found in the Automation Document parameters")
+
+          target_ec2_instance_types = []
+          for instance_type in events["TargetEC2InstanceTypeList"].strip().split(","):
+            instance_type = instance_type.strip()
+            if instance_type != "":
+              if instance_type not in instance_type_map:
+                raise Exception(f"Instance type ('{instance_type}') is not supported")
+              if len(target_ec2_instance_types) > 0 and instance_type_map[target_ec2_instance_types[0]] != instance_type_map[instance_type]:
+                raise Exception(f"Instance types '{target_ec2_instance_types[0]}' and '{instance_type}' are not in the same family")
+
+              target_ec2_instance_types.append(instance_type)
+
+          if len(target_ec2_instance_types) == 0:
+            raise Exception("TargetEC2InstanceTypeList was empty")
+
+          if len(target_ec2_instance_types) == 1:
+            raise Exception("TargetEC2InstanceTypeList only contained one instance type")
+
+          output["target_ec2_instance_types"] = json.dumps(target_ec2_instance_types)
+
+          if events["CPUUtilizationLowThreshold"].strip() == "":
+            raise Exception("CPUUtilizationLowThreshold was not found in the Automation Document parameters")
+          output["cpu_utilization_low_threshold"] = int(events["CPUUtilizationLowThreshold"].strip())
+
+          if output["cpu_utilization_low_threshold"] < 1 or output["cpu_utilization_low_threshold"] > 100:
+            raise Exception("Invalid value for CPUUtilizationLowThreshold. Must be an integer between 1 and 100")
+
+          if events["CPUUtilizationHighThreshold"].strip() == "":
+            raise Exception("CPUUtilizationHighThreshold was not found in the Automation Document parameters")
+          output["cpu_utilization_high_threshold"] = int(events["CPUUtilizationHighThreshold"].strip())
+
+          if output["cpu_utilization_high_threshold"] < 1 or output["cpu_utilization_high_threshold"] > 100:
+            raise Exception("Invalid value for CPUUtilizationHighThreshold. Must be an integer between 1 and 100")
+
+          if output["cpu_utilization_high_threshold"] <= output["cpu_utilization_low_threshold"]:
+            raise Exception("CPUUtilizationHighThreshold must be higher than CPUUtilizationLowThreshold")
+
+          output["cpu_utilization_low_threshold"] = str(output["cpu_utilization_low_threshold"])
+          output["cpu_utilization_high_threshold"] = str(output["cpu_utilization_high_threshold"])
+
+          if "ResourceId" not in sqs_msg_body:
+            raise Exception("ResourceId was not found in the SQS Message Body.")
+
+          output["resource_id"] = sqs_msg_body["ResourceId"]
+
+          if "TargetTag" not in sqs_msg_body:
+            raise Exception("TargetTag was not found in the SQS Message Body.")
+          output["target_tag_name"] = sqs_msg_body["TargetTag"]
+
+          if "ResourceRegion" not in sqs_msg_body:
+            raise Exception("ResourceRegion was not found in the SQS Message Body.")
+          output["source_region"] = sqs_msg_body["ResourceRegion"]
+
+          if "ResourceAccount" not in sqs_msg_body:
+            raise Exception("ResourceAccount was not found in the SQS Message Body.")
+          output["source_account_id"] = sqs_msg_body["ResourceAccount"]
+
+          if "TaskId" not in sqs_msg_body:
+            raise Exception("TaskId was not found in the SQS Message Body.")
+          output["task_id"] = sqs_msg_body["TaskId"]
+
+          if "ParentExecutionId" not in sqs_msg_body:
+            raise Exception("ParentExecutionId was not found in the SQS Message Body.")
+          output["parent_execution_id"] = sqs_msg_body["ParentExecutionId"]
+
+          return output
+    outputs:
+    - Name: "resource_id"
+      Selector: "$.Payload.resource_id"
+      Type: "String"
+    - Name: "source_region"
+      Selector: "$.Payload.source_region"
+      Type: "String"
+    - Name: "source_account_id"
+      Selector: "$.Payload.source_account_id"
+      Type: "String"
+    - Name: "target_tag_name"
+      Selector: "$.Payload.target_tag_name"
+      Type: "String"
+    - Name: "task_id"
+      Selector: "$.Payload.task_id"
+      Type: "String"
+    - Name: "parent_execution_id"
+      Selector: "$.Payload.parent_execution_id"
+      Type: "String"
+    - Name: "target_ec2_instance_types"
+      Selector: "$.Payload.target_ec2_instance_types"
+      Type: "String"
+    - Name: "cpu_utilization_high_threshold"
+      Selector: "$.Payload.cpu_utilization_high_threshold"
+      Type: "String"
+    - Name: "cpu_utilization_low_threshold"
+      Selector: "$.Payload.cpu_utilization_low_threshold"
+      Type: "String"
+-   name: "CREATE_PERFORM_ACTION_AUTOMATION_EXECUTION_RECORD"
+    action: aws:executeAwsApi
+    timeoutSeconds: 30
+    description: "Creates a record of this automation execution in the Operations Conductor Automation Executions Table"
+    inputs: {
+      "Service": "dynamodb",
+      "Api": "PutItem",
+      "TableName": "%%AutomationExecutionsTableName%%",
+      "Item": {
+        "parentExecutionId": { "S": "{{ VALIDATE_MSG_CONTENTS.parent_execution_id }}" },
+        "automationExecutionId": { "S": "{{ automation:EXECUTION_ID }}" },
+        "status": { "S": "InProgress" }
+      }
+    }
+-   name: "CHECK_IF_INSTANCE_RESIZE_NEEDED"
+    action: aws:executeScript
+    timeoutSeconds: 30
+    description: "Check if the instance needs to be resized and if so, stop the instance"
+    inputs:
+      Runtime: python3.6
+      Handler: script_handler
+      InputPayload:
+        source_account_id: "{{ VALIDATE_MSG_CONTENTS.source_account_id }}"
+        source_region: "{{ VALIDATE_MSG_CONTENTS.source_region }}"
+        resource_id: "{{ VALIDATE_MSG_CONTENTS.resource_id }}"
+        target_tag_name: "{{ VALIDATE_MSG_CONTENTS.target_tag_name }}"
+        target_ec2_instance_types: "{{ VALIDATE_MSG_CONTENTS.target_ec2_instance_types }}"
+        cpu_utilization_low_threshold: "{{ VALIDATE_MSG_CONTENTS.cpu_utilization_low_threshold }}"
+        cpu_utilization_high_threshold: "{{ VALIDATE_MSG_CONTENTS.cpu_utilization_high_threshold }}"
+        task_id: "{{ VALIDATE_MSG_CONTENTS.task_id }}"
+      Script: |-
+        import boto3
+        import json
+        import time
+        from datetime import datetime, timedelta, timezone
+        def instance_has_tag(instance, target_tag_key):
+          tag_found = False
+          if "Tags" not in instance:
+            raise Exception("The instance does not have a list of Tags")
+
+          for tag in instance["Tags"]:
+            if tag["Key"] == target_tag_key:
+              tag_found = True
+              break
+
+          return tag_found
+
+        def script_handler(events, context):
+          response = { "statusCode": 200, "resize_to_instance_type": "", "next_step": "WAIT_FOR_INSTANCE_STOPPED" }
+          task_id = events["task_id"]
+          source_account_id = events["source_account_id"]
+          source_region = events["source_region"]
+
+          # Assume role in source account
+          sts_connection = boto3.client('sts')
+          assumed_role = sts_connection.assume_role(
+              RoleArn=f"arn:aws:iam::{source_account_id}:role/{source_account_id}-{source_region}-{task_id}",
+              RoleSessionName="ops_conductor_resize_instance"
+          )
+
+          # Look up the Volume by ID and make sure it is still tagged correctly
+          ec2_client = boto3.client(
+            'ec2',
+            region_name=source_region,
+            aws_access_key_id=assumed_role['Credentials']['AccessKeyId'],
+            aws_secret_access_key=assumed_role['Credentials']['SecretAccessKey'],
+            aws_session_token=assumed_role['Credentials']['SessionToken']
+          )
+
+          print(f"Describing instance { events['resource_id'] }...")
+          desc_instances_response = ec2_client.describe_instances(
+            Filters=[
+              {
+                "Name": "instance-id", "Values": [events["resource_id"]]
+              }
+            ]
+          )
+
+          if "Reservations" not in desc_instances_response:
+            raise Exception(f"Unexpected response when looking up Instance { events['resource_id'] }. 'Reservations' list was not included in the response")
+
+          if len(desc_instances_response["Reservations"]) != 1:
+            raise Exception(f"The number of Reservations returned is {len(desc_instances_response['Reservations'])}. Only one is expected")
+
+          if "Instances" not in desc_instances_response["Reservations"][0]:
+            raise Exception(f"Unexpected response when looking up Instance { events['resource_id'] }. 'Instances' list was not included in the Reservation")
+
+          if len(desc_instances_response["Reservations"][0]["Instances"]) != 1:
+            raise Exception(f"The number of Instances returned is {len(desc_instances_response['Reservations'][0]['Instances'])}. Only one is expected")
+
+          instance = desc_instances_response["Reservations"][0]["Instances"][0]
+
+          print(f"Instance { events['resource_id'] } found. Current state is {instance['State']['Name']}. Current Instance Type is {instance['InstanceType']}")
+
+          # Do not continue if the instance is not running
+          if instance['State']['Name'] != "running":
+            print(f"Instance ({ events['resource_id'] }) is not currently running. Exiting.")
+            response["next_step"] = "NO_ACTION_PERFORMED_REMOVE_MSG_FROM_RESOURCE_QUEUE"
+            return response
+
+          # Do not continue if the instance is not tagged with the target tag from the Ops Conductor task
+          if not instance_has_tag(instance, events['target_tag_name']):
+            raise Exception(f"Instance ({ events['resource_id'] }) was found but it was not tagged with { events['target_tag_name'] }")
+
+          # Check to make sure the current instance type was included in the list when the task was created
+          target_ec2_instance_types = json.loads(events['target_ec2_instance_types'])
+          try:
+            current_instance_type_index = target_ec2_instance_types.index(instance['InstanceType'])
+          except ValueError:
+            raise Exception(f"The current instance type ({instance['InstanceType']}) was not included in the list entered when creating the task")
+
+          cw_client = boto3.client(
+            'cloudwatch',
+            region_name=source_region,
+            aws_access_key_id=assumed_role['Credentials']['AccessKeyId'],
+            aws_secret_access_key=assumed_role['Credentials']['SecretAccessKey'],
+            aws_session_token=assumed_role['Credentials']['SessionToken']
+          )
+          print(f"Retrieving current CPU Utilization for Instance { events['resource_id'] }")
+          metric_data_response = cw_client.get_metric_data(
+            MetricDataQueries=[
+                {
+                    'Id': 'arbitraryOperationsConductorMetricID',
+                    'MetricStat': {
+                        'Metric': {
+                            'Namespace': 'AWS/EC2',
+                            'Dimensions': [
+                                {
+                                    'Name': 'InstanceId',
+                                    'Value': events["resource_id"]
+                                }
+                            ],
+                            'MetricName': 'CPUUtilization',
+                        },
+                        'Period': 300,
+                        'Stat': 'Average',
+                        'Unit': 'Percent'
+                    },
+                },
+            ],
+            StartTime=datetime.now(timezone.utc) - timedelta(hours=1),
+            EndTime=datetime.now(timezone.utc)
+          )
+
+          if "MetricDataResults" not in metric_data_response:
+            raise Exception("Unexpected response from CloudWatch when requesting metric data")
+
+          if len(metric_data_response["MetricDataResults"]) < 1:
+            raise Exception("MetricDataResults were not returned by Cloudwatch")
+
+          if len(metric_data_response["MetricDataResults"][0]["Values"]) < 1:
+            raise Exception("MetricDataResults did not contain any values")
+
+          # Most recent value is at the beginning of the list
+          current_cpu_utilization = float(metric_data_response["MetricDataResults"][0]["Values"][0])
+
+          resize_to_instance_type = None
+          cpu_utilization_low_threshold = int(events["cpu_utilization_low_threshold"])
+          cpu_utilization_high_threshold = int(events["cpu_utilization_high_threshold"])
+
+          if current_cpu_utilization < cpu_utilization_low_threshold:
+            print(f"Current Average CPU Utilization is {current_cpu_utilization}, which is below the lower threshold of { cpu_utilization_low_threshold }")
+            if current_instance_type_index == 0:
+              print("The instance is currently at the smallest instance type that was provided in the task arguments. We cannot resize down.")
+              response["next_step"] = "NO_ACTION_PERFORMED_REMOVE_MSG_FROM_RESOURCE_QUEUE"
+              return response
+
+            resize_to_instance_type = target_ec2_instance_types[current_instance_type_index - 1]
+          elif current_cpu_utilization > cpu_utilization_high_threshold:
+            print(f"Current Average CPU Utilization is {current_cpu_utilization}, which is above the higher threshold of { cpu_utilization_high_threshold }")
+            if current_instance_type_index == (len(target_ec2_instance_types) - 1):
+              print("The instance is currently at the largest instance type that was provided in the task arguments. We cannot resize up.")
+              response["next_step"] = "NO_ACTION_PERFORMED_REMOVE_MSG_FROM_RESOURCE_QUEUE"
+              return response
+
+            resize_to_instance_type = target_ec2_instance_types[current_instance_type_index + 1]
+
+          if resize_to_instance_type is not None:
+            print(f"Instance ({ events['resource_id'] }) will be resized to {resize_to_instance_type}")
+            # Stop the instance
+            stop_response = ec2_client.stop_instances(InstanceIds=[events["resource_id"]])
+            print(f"Instance stop requested for  { events['resource_id'] }")
+            response["resize_to_instance_type"] = resize_to_instance_type
+
+            return response
+          else:
+            print(f"Current CPU Utilization ({current_cpu_utilization}) is between the lower ({ events['cpu_utilization_low_threshold'] }) and higher ({ events['cpu_utilization_high_threshold'] }) thresholds. No action needed.")
+            response["next_step"] = "NO_ACTION_PERFORMED_REMOVE_MSG_FROM_RESOURCE_QUEUE"
+            return response
+    outputs:
+    - Name: "next_step"
+      Selector: "$.Payload.next_step"
+      Type: "String"
+    - Name: "resize_to_instance_type"
+      Selector: "$.Payload.resize_to_instance_type"
+      Type: "String"
+
+# Decision point for whether an action was performed and we need to proceed or whether
+# the action was skipped (i.e. instance did not need to be resized)
+-   name: "determineNextStep"
+    action: "aws:branch"
+    inputs:
+        Choices:
+            -   NextStep: "WAIT_FOR_INSTANCE_STOPPED"
+                Variable: "{{ CHECK_IF_INSTANCE_RESIZE_NEEDED.next_step }}"
+                StringEquals: "WAIT_FOR_INSTANCE_STOPPED"
+            -   NextStep: "NO_ACTION_PERFORMED_REMOVE_MSG_FROM_RESOURCE_QUEUE"
+                Variable: "{{ CHECK_IF_INSTANCE_RESIZE_NEEDED.next_step }}"
+                StringEquals: "NO_ACTION_PERFORMED_REMOVE_MSG_FROM_RESOURCE_QUEUE"
+    isEnd: true
+
+-   name: "WAIT_FOR_INSTANCE_STOPPED"
+    action: aws:executeScript
+    timeoutSeconds: 300
+    description: "Waits for the instance to be in a 'stopped' state"
+    inputs:
+      Runtime: python3.6
+      Handler: script_handler
+      InputPayload:
+        task_id: "{{ VALIDATE_MSG_CONTENTS.task_id }}"
+        source_account_id: "{{ VALIDATE_MSG_CONTENTS.source_account_id }}"
+        source_region: "{{ VALIDATE_MSG_CONTENTS.source_region }}"
+        resource_id: "{{ VALIDATE_MSG_CONTENTS.resource_id }}"
+      Script: |-
+        import boto3
+        import json
+        import time
+        def get_instance_status(instance_id, account_id, region, task_id):
+          # Assume role in source account
+          sts_connection = boto3.client('sts')
+          assumed_role = sts_connection.assume_role(
+              RoleArn=f"arn:aws:iam::{account_id}:role/{account_id}-{region}-{task_id}",
+              RoleSessionName="ops_conductor_resize_instance"
+          )
+
+          ec2_client = boto3.client(
+            'ec2',
+            region_name=region,
+            aws_access_key_id=assumed_role['Credentials']['AccessKeyId'],
+            aws_secret_access_key=assumed_role['Credentials']['SecretAccessKey'],
+            aws_session_token=assumed_role['Credentials']['SessionToken']
+          )
+
+          print(f"Describing instance '{instance_id}'...")
+          desc_instances_response = ec2_client.describe_instances(
+            Filters=[
+              {
+                "Name": "instance-id", "Values": [instance_id]
+              }
+            ]
+          )
+
+          if "Reservations" not in desc_instances_response:
+            raise Exception(f"Unexpected response when looking up Instance '{instance_id}'. 'Reservations' list was not included in the response")
+
+          if len(desc_instances_response["Reservations"]) != 1:
+            raise Exception(f"The number of Reservations returned is {len(desc_instances_response['Reservations'])}. Only one is expected")
+
+          if "Instances" not in desc_instances_response["Reservations"][0]:
+            raise Exception(f"Unexpected response when looking up Instance '{instance_id}'. 'Instances' list was not included in the Reservation")
+
+          if len(desc_instances_response["Reservations"][0]["Instances"]) != 1:
+            raise Exception(f"The number of Instances returned is {len(desc_instances_response['Reservations'][0]['Instances'])}. Only one is expected")
+
+          return desc_instances_response["Reservations"][0]["Instances"][0]["State"]["Name"]
+
+        def script_handler(events, context):
+          task_id = events["task_id"]
+          source_account_id = events["source_account_id"]
+          source_region = events["source_region"]
+          resource_id = events["resource_id"]
+          sleep_time = 10
+
+          instance_status = get_instance_status(resource_id, source_account_id, source_region, task_id)
+          while instance_status != "stopped":
+            print(f"Instance is currently {instance_status}. Sleeping for {sleep_time} seconds")
+            time.sleep(sleep_time)
+            instance_status = get_instance_status(events["resource_id"], source_account_id, source_region, task_id)
+
+          print(f"Instance ({ events['resource_id'] }) is stopped")
+
+          return  { 'statusCode': 200 }
+-   name: "PERFORM_INSTANCE_RESIZE_ACTION"
+    action: aws:executeScript
+    timeoutSeconds: 30
+    description: "Resize the instance as needed and then restart it"
+    inputs:
+      Runtime: python3.6
+      Handler: script_handler
+      InputPayload:
+        source_account_id: "{{ VALIDATE_MSG_CONTENTS.source_account_id }}"
+        source_region: "{{ VALIDATE_MSG_CONTENTS.source_region }}"
+        resource_id: "{{ VALIDATE_MSG_CONTENTS.resource_id }}"
+        target_instance_type: "{{ CHECK_IF_INSTANCE_RESIZE_NEEDED.resize_to_instance_type }}"
+        task_id: "{{ VALIDATE_MSG_CONTENTS.task_id }}"
+      Script: |-
+        import boto3
+        import json
+        def script_handler(events, context):
+          task_id = events["task_id"]
+          source_account_id = events["source_account_id"]
+          source_region = events["source_region"]
+
+          print(f"Resizing instance ({ events['resource_id'] }) to { events['target_instance_type'] }")
+
+          # Assume role in source account
+          sts_connection = boto3.client('sts')
+          assumed_role = sts_connection.assume_role(
+              RoleArn=f"arn:aws:iam::{source_account_id}:role/{source_account_id}-{source_region}-{task_id}",
+              RoleSessionName="ops_conductor_resize_instance"
+          )
+
+          ec2_client = boto3.client(
+            'ec2',
+            region_name=source_region,
+            aws_access_key_id=assumed_role['Credentials']['AccessKeyId'],
+            aws_secret_access_key=assumed_role['Credentials']['SecretAccessKey'],
+            aws_session_token=assumed_role['Credentials']['SessionToken']
+          )
+
+          resize_response = ec2_client.modify_instance_attribute(
+            InstanceId=events["resource_id"],
+            InstanceType={ "Value": events["target_instance_type"] }
+          )
+
+          print(f"Instance ({ events['resource_id'] }) has been resized to { events['target_instance_type'] }")
+
+          ec2_client.start_instances(InstanceIds=[events["resource_id"]])
+          print(f"Instance ({ events['resource_id'] }) is being restarted")
+
+          return  { 'statusCode': 200 }
+-   name: "REMOVE_MSG_FROM_RESOURCE_QUEUE"
+    action: "aws:executeAwsApi"
+    inputs: {
+      "Service": "sqs",
+      "Api": "DeleteMessage",
+      "QueueUrl": "%%ResourceQueueUrl%%",
+      "ReceiptHandle": "{{ SQSMsgReceiptHandle }}"
+    }
+-   name: "UPDATE_AUTOMATION_EXECUTION_RECORD"
+    action: aws:executeAwsApi
+    timeoutSeconds: 30
+    description: "Updates the record of this automation execution in the Operations Conductor Automation Executions Table to mark it as successfully completed"
+    inputs: {
+      "Service": "dynamodb",
+      "Api": "UpdateItem",
+      "TableName": "%%AutomationExecutionsTableName%%",
+      "Key": {
+        "parentExecutionId": { "S": "{{ VALIDATE_MSG_CONTENTS.parent_execution_id }}" },
+        "automationExecutionId": { "S": "{{ automation:EXECUTION_ID }}" }
+      },
+      "UpdateExpression": "SET #stat = :val1",
+      "ExpressionAttributeNames": {
+        "#stat": "status"
+      },
+      "ExpressionAttributeValues": {
+        ":val1": { "S": "Success" }
+      }
+    }
+-   name: "UPDATE_TASK_EXECUTIONS_RECORD"
+    action: aws:executeAwsApi
+    timeoutSeconds: 30
+    description: "Updates the record for the overall execution of the Operations Conductor Task that spawned this automation"
+    inputs: {
+      "Service": "dynamodb",
+      "Api": "UpdateItem",
+      "TableName": "%%TaskExecutionsTableName%%",
+      "Key": {
+        "taskId": { "S": "{{ VALIDATE_MSG_CONTENTS.task_id }}" },
+        "parentExecutionId": { "S": "{{ VALIDATE_MSG_CONTENTS.parent_execution_id }}" }
+      },
+      "UpdateExpression": "SET completedResourceCount = completedResourceCount + :incr, lastUpdateTime = :uptime",
+      "ExpressionAttributeValues": {
+        ":incr": { "N": "1" },
+        ":uptime": { "S": "{{ global:DATE_TIME }}" }
+      }
+    }
+-   name: "CHECK_FOR_TASK_EXECUTION_COMPLETION"
+    action: aws:executeAwsApi
+    timeoutSeconds: 30
+    description: "Marks the overall task execution as Success if all resources have been successfully acted on"
+    inputs: {
+      "Service": "dynamodb",
+      "Api": "UpdateItem",
+      "TableName": "%%TaskExecutionsTableName%%",
+      "Key": {
+        "taskId": { "S": "{{ VALIDATE_MSG_CONTENTS.task_id }}" },
+        "parentExecutionId": { "S": "{{ VALIDATE_MSG_CONTENTS.parent_execution_id }}" }
+      },
+      "UpdateExpression": "SET #s = :stat",
+      "ConditionExpression": "completedResourceCount = totalResourceCount",
+      "ExpressionAttributeNames": {
+        "#s": "status"
+      },
+      "ExpressionAttributeValues": {
+        ":stat": { "S": "Success" }
+      }
+    }
+    onFailure: Continue
+    isEnd: true
+
+# Cleanup in case when the action was skipped (i.e. instance was not running or the average CPU utilization was within threshold bounds)
+-   name: "NO_ACTION_PERFORMED_REMOVE_MSG_FROM_RESOURCE_QUEUE"
+    action: "aws:executeAwsApi"
+    inputs: {
+      "Service": "sqs",
+      "Api": "DeleteMessage",
+      "QueueUrl": "%%ResourceQueueUrl%%",
+      "ReceiptHandle": "{{ SQSMsgReceiptHandle }}"
+    }
+-   name: "NO_ACTION_PERFORMED_UPDATE_AUTOMATION_EXECUTION_RECORD"
+    action: aws:executeAwsApi
+    timeoutSeconds: 30
+    description: "Updates the record of this automation execution in the Operations Conductor Automation Executions Table to mark it as successfully completed"
+    inputs: {
+      "Service": "dynamodb",
+      "Api": "UpdateItem",
+      "TableName": "%%AutomationExecutionsTableName%%",
+      "Key": {
+        "parentExecutionId": { "S": "{{ VALIDATE_MSG_CONTENTS.parent_execution_id }}" },
+        "automationExecutionId": { "S": "{{ automation:EXECUTION_ID }}" }
+      },
+      "UpdateExpression": "SET #stat = :val1",
+      "ExpressionAttributeNames": {
+        "#stat": "status"
+      },
+      "ExpressionAttributeValues": {
+        ":val1": { "S": "Success" }
+      }
+    }
+-   name: "NO_ACTION_PERFORMED_UPDATE_TASK_EXECUTIONS_RECORD"
+    action: aws:executeAwsApi
+    timeoutSeconds: 30
+    description: "Updates the record for the overall execution of the Operations Conductor Task that spawned this automation"
+    inputs: {
+      "Service": "dynamodb",
+      "Api": "UpdateItem",
+      "TableName": "%%TaskExecutionsTableName%%",
+      "Key": {
+        "taskId": { "S": "{{ VALIDATE_MSG_CONTENTS.task_id }}" },
+        "parentExecutionId": { "S": "{{ VALIDATE_MSG_CONTENTS.parent_execution_id }}" }
+      },
+      "UpdateExpression": "SET completedResourceCount = completedResourceCount + :incr, lastUpdateTime = :uptime",
+      "ExpressionAttributeValues": {
+        ":incr": { "N": "1" },
+        ":uptime": { "S": "{{ global:DATE_TIME }}" }
+      }
+    }
+-   name: "NO_ACTION_PERFORMED_CHECK_FOR_TASK_EXECUTION_COMPLETION"
+    action: aws:executeAwsApi
+    timeoutSeconds: 30
+    description: "Marks the overall task execution as Success if all resources have been successfully acted on"
+    inputs: {
+      "Service": "dynamodb",
+      "Api": "UpdateItem",
+      "TableName": "%%TaskExecutionsTableName%%",
+      "Key": {
+        "taskId": { "S": "{{ VALIDATE_MSG_CONTENTS.task_id }}" },
+        "parentExecutionId": { "S": "{{ VALIDATE_MSG_CONTENTS.parent_execution_id }}" }
+      },
+      "UpdateExpression": "SET #s = :stat",
+      "ConditionExpression": "completedResourceCount = totalResourceCount",
+      "ExpressionAttributeNames": {
+        "#s": "status"
+      },
+      "ExpressionAttributeValues": {
+        ":stat": { "S": "Success" }
+      }
+    }
+    onFailure: Continue
+    isEnd: true

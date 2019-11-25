@@ -1,0 +1,56 @@
+{
+    "name": "operations-conductor-console",
+    "description": "The Operations Conductor Web console",
+    "version": "1.0.0",
+    "private": true,
+    "dependencies": {
+        "aws-amplify": "^1.2.3",
+        "aws-amplify-react": "^2.5.3",
+        "react": "^16.11.0",
+        "react-dom": "^16.11.0",
+        "react-router-dom": "^5.1.2",
+        "react-scripts": "^3.2.0",
+        "react-bootstrap": "^0.32.4",
+        "react-router-bootstrap": "^0.25.0",
+        "bootstrap": "^3.3.7",
+        "node-sass": "^4.12.0"
+    },
+    "devDependencies": {
+        "@types/react": "^16.9.9",
+        "@types/react-dom": "^16.9.2",
+        "@types/react-router-dom": "^5.1.0",
+        "@types/react-bootstrap": "^0.32.20",
+        "@types/react-router-bootstrap": "^0.24.5",
+        "typescript": "3.2.1"
+    },
+    "scripts": {
+        "start": "react-scripts start",
+        "build:init": "rm -rf packgage-lock.json && rm -rf node_modules && rm -rf build",
+        "build": "npm run build:init && npm install && react-scripts build",
+        "test": "CI=true react-scripts test --coverage",
+        "eject": "react-scripts eject"
+    },
+    "eslintConfig": {
+        "extends": "react-app"
+    },
+    "browserslist": {
+        "production": [
+            ">0.2%",
+            "not dead",
+            "not op_mini all"
+        ],
+        "development": [
+            "last 1 chrome version",
+            "last 1 firefox version",
+            "last 1 safari version"
+        ]
+    },
+    "jest": {
+        "collectCoverageFrom": [
+            "src/**/*.{ts,tsx}",
+            "!src/react-app-env.d.ts",
+            "!src/types/aws-amplify-react.d.ts",
+            "!src/index.tsx"
+        ]
+    }
+}

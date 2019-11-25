@@ -1,0 +1,285 @@
+---
+description: "(Operations Conductor) Copies an EBS Volume Snapshot"
+schemaVersion: "0.3"
+
+assumeRole: "%%OperationsConductorSharedRoleArn%%"
+
+parameters:
+  SQSMsgBody:
+    type: "String"
+    description: "JSON Stringified version of the message body that was read off the Resource Queue"
+  SQSMsgReceiptHandle:
+    type: "String"
+    description: "Receipt handle of the SQS message that was read off the queue"
+  TargetResourceType:
+    type: "String"
+    description: "The AWS resource type for which this automation applies. The format of this value should be: service:resourceType"
+    default: "ec2:snapshot"
+  DestinationAccount:
+    type: "String"
+    description: "(Required) The account where the Snapshot will be copied to. Please be sure to include this account in the Accounts list on Step 5: Task Scope"
+    default: ""
+  DestinationRegion:
+    type: "String"
+    description: "(Required) The region where the Snapshot will be copied to. Please be sure to include this region in the Regions list on Step 5: Task Scope"
+    default: ""
+
+mainSteps:
+-   name: "VALIDATE_MSG_CONTENTS"
+    action: aws:executeScript
+    timeoutSeconds: 30
+    description: "Validates contents of the message from the Resource Queue and parses out parameters"
+    inputs:
+      Runtime: python3.6
+      Handler: script_handler
+      InputPayload:
+        SQSMsgBody: "{{ SQSMsgBody }}"
+        DestinationAccount: "{{ DestinationAccount }}"
+        DestinationRegion: "{{ DestinationRegion }}"
+      Script: |-
+        import boto3
+        import json
+        def script_handler(events, context):
+          output = { "statusCode": 200 }
+          sqs_msg_body = json.loads(events["SQSMsgBody"])
+
+          if "ResourceId" not in sqs_msg_body:
+            raise Exception("ResourceId was not found in the SQS Message Body.")
+
+          output["resource_id"] = sqs_msg_body["ResourceId"]
+
+          if "ResourceRegion" not in sqs_msg_body:
+            raise Exception("ResourceRegion was not found in the SQS Message Body.")
+          output["source_region"] = sqs_msg_body["ResourceRegion"]
+
+          if "ResourceAccount" not in sqs_msg_body:
+            raise Exception("ResourceAccount was not found in the SQS Message Body.")
+          output["source_account_id"] = sqs_msg_body["ResourceAccount"]
+
+          if "TargetTag" not in sqs_msg_body:
+            raise Exception("TargetTag was not found in the SQS Message Body.")
+          output["target_tag_name"] = sqs_msg_body["TargetTag"]
+
+          if "TaskId" not in sqs_msg_body:
+            raise Exception("TaskId was not found in the SQS Message Body.")
+          output["task_id"] = sqs_msg_body["TaskId"]
+
+          if "ParentExecutionId" not in sqs_msg_body:
+            raise Exception("ParentExecutionId was not found in the SQS Message Body.")
+          output["parent_execution_id"] = sqs_msg_body["ParentExecutionId"]
+
+          if events["DestinationAccount"].strip() == "":
+            raise Exception("DestinationAccount was not set in the Automation Document parameters")
+          output["destination_account_id"] = events["DestinationAccount"]
+
+          if events["DestinationRegion"].strip() == "":
+            raise Exception("DestinationRegion was not set in the Automation Document parameters")
+          output["destination_region"] = events["DestinationRegion"]
+
+          return output
+    outputs:
+    - Name: "resource_id"
+      Selector: "$.Payload.resource_id"
+      Type: "String"
+    - Name: "source_region"
+      Selector: "$.Payload.source_region"
+      Type: "String"
+    - Name: "source_account_id"
+      Selector: "$.Payload.source_account_id"
+      Type: "String"
+    - Name: "target_tag_name"
+      Selector: "$.Payload.target_tag_name"
+      Type: "String"
+    - Name: "task_id"
+      Selector: "$.Payload.task_id"
+      Type: "String"
+    - Name: "parent_execution_id"
+      Selector: "$.Payload.parent_execution_id"
+      Type: "String"
+    - Name: "destination_account_id"
+      Selector: "$.Payload.destination_account_id"
+      Type: "String"
+    - Name: "destination_region"
+      Selector: "$.Payload.destination_region"
+      Type: "String"
+-   name: "CREATE_AUTOMATION_EXECUTION_RECORD"
+    action: aws:executeAwsApi
+    timeoutSeconds: 30
+    description: "Creates a record of this automation execution in the Operations Conductor Automation Executions Table"
+    inputs: {
+      "Service": "dynamodb",
+      "Api": "PutItem",
+      "TableName": "%%AutomationExecutionsTableName%%",
+      "Item": {
+        "parentExecutionId": { "S": "{{ VALIDATE_MSG_CONTENTS.parent_execution_id }}" },
+        "automationExecutionId": { "S": "{{ automation:EXECUTION_ID }}" },
+        "status": { "S": "InProgress" }
+      }
+    }
+-   name: "PERFORM_ACTION_ON_RESOURCE"
+    action: aws:executeScript
+    timeoutSeconds: 30
+    description: "Copies snapshot(s) matching the ARN that was included in the SQSMsgBody"
+    inputs:
+      Runtime: python3.6
+      Handler: script_handler
+      InputPayload:
+        source_account_id: "{{ VALIDATE_MSG_CONTENTS.source_account_id }}"
+        source_region: "{{ VALIDATE_MSG_CONTENTS.source_region }}"
+        destination_account_id: "{{ VALIDATE_MSG_CONTENTS.destination_account_id }}"
+        destination_region: "{{ VALIDATE_MSG_CONTENTS.destination_region }}"
+        resource_id: "{{ VALIDATE_MSG_CONTENTS.resource_id }}"
+        target_tag_name: "{{ VALIDATE_MSG_CONTENTS.target_tag_name }}"
+        task_id: "{{ VALIDATE_MSG_CONTENTS.task_id }}"
+      Script: |-
+        import boto3
+        import json
+        def script_handler(events, context):
+          task_id = events["task_id"]
+          source_account_id = events["source_account_id"]
+          source_region = events["source_region"]
+          destination_account_id = events["destination_account_id"]
+          destination_region = events["destination_region"]
+
+          # Assume role in source account
+          sts_connection = boto3.client('sts')
+          assumed_role = sts_connection.assume_role(
+              RoleArn=f"arn:aws:iam::{source_account_id}:role/{source_account_id}-{source_region}-{task_id}",
+              RoleSessionName="ops_conductor_copy_snapshot"
+          )
+
+          # Look up the Snapshot by ID and make sure it is still tagged correctly
+          ec2_source_client = boto3.client(
+            'ec2',
+            region_name=source_region,
+            aws_access_key_id=assumed_role['Credentials']['AccessKeyId'],
+            aws_secret_access_key=assumed_role['Credentials']['SecretAccessKey'],
+            aws_session_token=assumed_role['Credentials']['SessionToken']
+          )
+          desc_snapshots_response = ec2_source_client.describe_snapshots(SnapshotIds=[events["resource_id"]])
+
+          if len(desc_snapshots_response["Snapshots"]) == 0:
+            raise Exception(f"Snapshot ({ events['resource_id'] }) was not found.")
+          elif len(desc_snapshots_response["Snapshots"]) > 1:
+            raise Exception(f"More than one snapshot was returned when looking for ID ({ events['resource_id'] }). There should be only one.")
+
+          tag_found = False
+          for tag in desc_snapshots_response["Snapshots"][0]["Tags"]:
+            if tag["Key"] == events["target_tag_name"]:
+              tag_found = True
+              break
+
+          if not tag_found:
+            raise Exception(f"Snapshot ({ events['resource_id'] }) was found but it was not tagged with { events['target_tag_name'] }.")
+
+          # Share the Snapshot with the destination account
+          if source_account_id != destination_account_id:
+            ec2_source_client.modify_snapshot_attribute(
+              Attribute="createVolumePermission",
+              CreateVolumePermission={
+                "Add": [
+                  {
+                    "UserId": destination_account_id
+                  }
+                ]
+              },
+              OperationType="add",
+              SnapshotId=events["resource_id"]
+            )
+
+          # Assume role in destination account
+          sts_connection = boto3.client('sts')
+          assumed_role = sts_connection.assume_role(
+              RoleArn=f"arn:aws:iam::{destination_account_id}:role/{destination_account_id}-{destination_region}-{task_id}",
+              RoleSessionName="ops_conductor_copy_snapshot"
+          )
+
+          ec2_destination_client = boto3.client(
+            'ec2',
+            region_name=destination_region,
+            aws_access_key_id=assumed_role['Credentials']['AccessKeyId'],
+            aws_secret_access_key=assumed_role['Credentials']['SecretAccessKey'],
+            aws_session_token=assumed_role['Credentials']['SessionToken']
+          )
+
+          # Perform the copy operation in the destination account
+          print(f"Copying Snapshot ({ events['resource_id'] }) from {source_account_id}/{source_region} to {destination_account_id}/{destination_region}")
+          copy_snapshot_response = ec2_destination_client.copy_snapshot(
+            Description=f"Copy of Snapshot ({ events['resource_id'] }) from {source_account_id}/{source_region}. Created by Operations Conductor",
+            SourceSnapshotId=events['resource_id'],
+            SourceRegion=source_region,
+            DestinationRegion=destination_region
+          )
+
+          print(f"Copy completed successfully. New Snapshot ID: {copy_snapshot_response['SnapshotId']}")
+
+          return  { 'statusCode': 200  }
+-   name: "REMOVE_MSG_FROM_RESOURCE_QUEUE"
+    action: "aws:executeAwsApi"
+    inputs: {
+      "Service": "sqs",
+      "Api": "DeleteMessage",
+      "QueueUrl": "%%ResourceQueueUrl%%",
+      "ReceiptHandle": "{{ SQSMsgReceiptHandle }}"
+    }
+-   name: "UPDATE_AUTOMATION_EXECUTION_RECORD"
+    action: aws:executeAwsApi
+    timeoutSeconds: 30
+    description: "Updates the record of this automation execution in the Operations Conductor Automation Executions Table to mark it as successfully completed"
+    inputs: {
+      "Service": "dynamodb",
+      "Api": "UpdateItem",
+      "TableName": "%%AutomationExecutionsTableName%%",
+      "Key": {
+        "parentExecutionId": { "S": "{{ VALIDATE_MSG_CONTENTS.parent_execution_id }}" },
+        "automationExecutionId": { "S": "{{ automation:EXECUTION_ID }}" }
+      },
+      "UpdateExpression": "SET #stat = :val1",
+      "ExpressionAttributeNames": {
+        "#stat": "status"
+      },
+      "ExpressionAttributeValues": {
+        ":val1": { "S": "Success" }
+      }
+    }
+-   name: "UPDATE_TASK_EXECUTIONS_RECORD"
+    action: aws:executeAwsApi
+    timeoutSeconds: 30
+    description: "Updates the record for the overall execution of the Operations Conductor Task that spawned this automation"
+    inputs: {
+      "Service": "dynamodb",
+      "Api": "UpdateItem",
+      "TableName": "%%TaskExecutionsTableName%%",
+      "Key": {
+        "taskId": { "S": "{{ VALIDATE_MSG_CONTENTS.task_id }}" },
+        "parentExecutionId": { "S": "{{ VALIDATE_MSG_CONTENTS.parent_execution_id }}" }
+      },
+      "UpdateExpression": "SET completedResourceCount = completedResourceCount + :incr, lastUpdateTime = :uptime",
+      "ExpressionAttributeValues": {
+        ":incr": { "N": "1" },
+        ":uptime": { "S": "{{ global:DATE_TIME }}" }
+      }
+    }
+-   name: "CHECK_FOR_TASK_EXECUTION_COMPLETION"
+    action: aws:executeAwsApi
+    timeoutSeconds: 30
+    description: "Marks the overall task execution as Success if all resources have been successfully acted on"
+    inputs: {
+      "Service": "dynamodb",
+      "Api": "UpdateItem",
+      "TableName": "%%TaskExecutionsTableName%%",
+      "Key": {
+        "taskId": { "S": "{{ VALIDATE_MSG_CONTENTS.task_id }}" },
+        "parentExecutionId": { "S": "{{ VALIDATE_MSG_CONTENTS.parent_execution_id }}" }
+      },
+      "UpdateExpression": "SET #s = :stat",
+      "ConditionExpression": "completedResourceCount = totalResourceCount",
+      "ExpressionAttributeNames": {
+        "#s": "status"
+      },
+      "ExpressionAttributeValues": {
+        ":stat": { "S": "Success" }
+      }
+    }
+    onFailure: Continue
+    isEnd: true

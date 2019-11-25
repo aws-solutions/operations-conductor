@@ -1,0 +1,63 @@
+@media (min-width: 1300px) {
+    .container {
+        width: 1270px;
+    }
+}
+
+footer {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    width: 100%;
+}
+
+.main-wrapper {
+    padding: 0 0 100px;
+    position: relative;
+}
+
+.custom-navbar {
+    margin: 0 0 0 0;
+    background-color: white !important;
+    border-color: white !important;
+}
+
+.execution-blue {
+    color: blue;
+}
+
+.execution-green {
+    color: green;
+}
+
+.execution-red {
+    color: red;
+}
+
+.execution-link {
+    cursor: pointer;
+    color: #337ab7;
+}
+
+.execution-link:hover {
+    color: #315e85;
+    text-decoration: underline;
+}
+
+.step-failure-glyphicon {
+    color: red;
+}
+
+.step-failure-p {
+    color: #333;
+}
+
+textarea.form-control {
+    height: 300px !important;
+    resize: none !important;
+}
+
+code {
+    color: #333;
+    background-color: white;
+}

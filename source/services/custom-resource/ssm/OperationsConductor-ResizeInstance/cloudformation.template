@@ -1,0 +1,76 @@
+# Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License").
+# You may not use this file except in compliance with the License.
+# A copy of the License is located at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# or in the "license" file accompanying this file. This file is distributed
+# on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
+# express or implied. See the License for the specific language governing
+# permissions and limitations under the License.
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "(SO0065) - Operations Conductor ResizeInstance for cross accounts/regions. Version %%VERSION%%"
+
+Mappings:
+    MasterAccount:
+        ResourceSelectorExecutionRole:
+            Name: "%%RESOURCE_SELECTOR_EXECUTION_ROLE_ARN%%"
+        DocumentAssumeRole:
+            Name: "%%OperationsConductorSharedRoleArn%%"
+        Account:
+            Id: "%%MASTER_ACCOUNT%%"
+
+Resources:
+    IAMRole:
+        Type: AWS::IAM::Role
+        Description: "Role to allow master account to perform actions"
+        Properties:
+            RoleName: !Sub "${AWS::AccountId}-${AWS::Region}-%%TASK_ID%%"
+            AssumeRolePolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                    -
+                        Effect: "Allow"
+                        Principal:
+                            AWS:
+                                - !FindInMap ["MasterAccount", "Account", "Id"]
+                        Action:
+                            - "sts:AssumeRole"
+            Path: "/"
+            Policies:
+                -
+                    PolicyName: "OperationsConductor-ResizeInstance"
+                    PolicyDocument:
+                        Version: "2012-10-17"
+                        Statement:
+                            -
+                                Effect: "Allow"
+                                Action:
+                                    - "ec2:DescribeInstances"
+                                    - "ec2:StopInstances"
+                                    - "ec2:StartInstances"
+                                    - "ec2:ModifyInstanceAttribute"
+                                    - "ec2:CreateTags"
+                                    - "cloudwatch:GetMetricData"
+                                    - "tag:GetResources"
+                                Resource:
+                                    - "*"
+                            -
+                                Effect: "Allow"
+                                Action:
+                                    - "iam:PassRole"
+                                Resource:
+                                    - !FindInMap ["MasterAccount", "ResourceSelectorExecutionRole", "Name"]
+                                    - !FindInMap ["MasterAccount", "DocumentAssumeRole", "Name"]
+        Metadata:
+            cfn_nag:
+                rules_to_suppress:
+                    -
+                        id: W11
+                        reason: "The * resource allows the master account of Operations Conductor to stop/start/modify instances."
+                    -
+                        id: W28
+                        reason: "The role name is intentional to assume role on master account and region."

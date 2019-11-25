@@ -1,0 +1,257 @@
+---
+description: "(Operations Conductor) Creates an EBS Volume Snapshot"
+schemaVersion: "0.3"
+
+assumeRole: "%%OperationsConductorSharedRoleArn%%"
+
+parameters:
+  SQSMsgBody:
+    type: "String"
+    description: "JSON Stringified version of the message body that was read off the Resource Queue"
+  SQSMsgReceiptHandle:
+    type: "String"
+    description: "Receipt handle of the SQS message that was read off the queue"
+  TargetResourceType:
+    type: "String"
+    description: "The AWS resource type for which this automation applies. The format of this value should be: service:resourceType"
+    default: "ec2:volume"
+  CopyVolumeTags:
+    type: "String"
+    description: "(Optional) Supply 'true' to copy the tags on the Volume to the Snapshot. Any other value will be treated as false."
+    default: "false"
+
+mainSteps:
+-   name: "VALIDATE_MSG_CONTENTS"
+    action: aws:executeScript
+    timeoutSeconds: 30
+    description: "Validates contents of the message from the Resource Queue and parses out parameters"
+    inputs:
+      Runtime: python3.6
+      Handler: script_handler
+      InputPayload:
+        SQSMsgBody: "{{ SQSMsgBody }}"
+        CopyVolumeTags: "{{ CopyVolumeTags }}"
+      Script: |-
+        import boto3
+        import json
+        def script_handler(events, context):
+          output = { "statusCode": 200 }
+          sqs_msg_body = json.loads(events["SQSMsgBody"])
+
+          if "ResourceId" not in sqs_msg_body:
+            raise Exception("ResourceId was not found in the SQS Message Body.")
+
+          output["resource_id"] = sqs_msg_body["ResourceId"]
+
+          if "ResourceRegion" not in sqs_msg_body:
+            raise Exception("ResourceRegion was not found in the SQS Message Body.")
+          output["source_region"] = sqs_msg_body["ResourceRegion"]
+
+          if "ResourceAccount" not in sqs_msg_body:
+            raise Exception("ResourceAccount was not found in the SQS Message Body.")
+          output["source_account_id"] = sqs_msg_body["ResourceAccount"]
+
+          if "TargetTag" not in sqs_msg_body:
+            raise Exception("TargetTag was not found in the SQS Message Body.")
+          output["target_tag_name"] = sqs_msg_body["TargetTag"]
+
+          if "TaskId" not in sqs_msg_body:
+            raise Exception("TaskId was not found in the SQS Message Body.")
+          output["task_id"] = sqs_msg_body["TaskId"]
+
+          if "ParentExecutionId" not in sqs_msg_body:
+            raise Exception("ParentExecutionId was not found in the SQS Message Body.")
+          output["parent_execution_id"] = sqs_msg_body["ParentExecutionId"]
+
+          output["copy_volume_tags"] = events["CopyVolumeTags"].strip().lower()
+
+          return output
+    outputs:
+    - Name: "resource_id"
+      Selector: "$.Payload.resource_id"
+      Type: "String"
+    - Name: "source_region"
+      Selector: "$.Payload.source_region"
+      Type: "String"
+    - Name: "source_account_id"
+      Selector: "$.Payload.source_account_id"
+      Type: "String"
+    - Name: "target_tag_name"
+      Selector: "$.Payload.target_tag_name"
+      Type: "String"
+    - Name: "task_id"
+      Selector: "$.Payload.task_id"
+      Type: "String"
+    - Name: "parent_execution_id"
+      Selector: "$.Payload.parent_execution_id"
+      Type: "String"
+    - Name: "copy_volume_tags"
+      Selector: "$.Payload.copy_volume_tags"
+      Type: "String"
+-   name: "CREATE_PERFORM_ACTION_AUTOMATION_EXECUTION_RECORD"
+    action: aws:executeAwsApi
+    timeoutSeconds: 30
+    description: "Creates a record of this automation execution in the Operations Conductor Automation Executions Table"
+    inputs: {
+      "Service": "dynamodb",
+      "Api": "PutItem",
+      "TableName": "%%AutomationExecutionsTableName%%",
+      "Item": {
+        "parentExecutionId": { "S": "{{ VALIDATE_MSG_CONTENTS.parent_execution_id }}" },
+        "automationExecutionId": { "S": "{{ automation:EXECUTION_ID }}" },
+        "status": { "S": "InProgress" }
+      }
+    }
+-   name: "PERFORM_ACTION_ON_RESOURCE"
+    action: aws:executeScript
+    timeoutSeconds: 30
+    description: "Creates a snapshot of the Volume matching the ARN that was included in the SQSMsgBody"
+    inputs:
+      Runtime: python3.6
+      Handler: script_handler
+      InputPayload:
+        source_account_id: "{{ VALIDATE_MSG_CONTENTS.source_account_id }}"
+        source_region: "{{ VALIDATE_MSG_CONTENTS.source_region }}"
+        resource_id: "{{ VALIDATE_MSG_CONTENTS.resource_id }}"
+        target_tag_name: "{{ VALIDATE_MSG_CONTENTS.target_tag_name }}"
+        copy_volume_tags: "{{ VALIDATE_MSG_CONTENTS.copy_volume_tags }}"
+        task_id: "{{ VALIDATE_MSG_CONTENTS.task_id }}"
+      Script: |-
+        import boto3
+        import json
+        def script_handler(events, context):
+          task_id = events["task_id"]
+          source_account_id = events["source_account_id"]
+          source_region = events["source_region"]
+
+          # Assume role in source account
+          sts_connection = boto3.client('sts')
+          assumed_role = sts_connection.assume_role(
+              RoleArn=f"arn:aws:iam::{source_account_id}:role/{source_account_id}-{source_region}-{task_id}",
+              RoleSessionName="ops_conductor_create_snapshot"
+          )
+
+          # Look up the Volume by ID and make sure it is still tagged correctly
+          ec2_client = boto3.client(
+            'ec2',
+            region_name=source_region,
+            aws_access_key_id=assumed_role['Credentials']['AccessKeyId'],
+            aws_secret_access_key=assumed_role['Credentials']['SecretAccessKey'],
+            aws_session_token=assumed_role['Credentials']['SessionToken']
+          )
+
+          desc_volumes_response = ec2_client.describe_volumes(VolumeIds=[events["resource_id"]])
+
+          if len(desc_volumes_response["Volumes"]) == 0:
+            raise Exception(f"Volume ({ events['resource_id'] }) was not found.")
+          elif len(desc_volumes_response["Volumes"]) > 1:
+            raise Exception(f"More than one volume was returned when looking for Volume ID ({ events['resource_id'] })")
+
+          tag_found = False
+          volume_tags = desc_volumes_response["Volumes"][0]["Tags"]
+          for tag in volume_tags:
+            if tag["Key"] == events["target_tag_name"]:
+              tag_found = True
+              break
+
+          if not tag_found:
+            raise Exception(f"Volume ({ events['resource_id'] }) was found but it was not tagged with { events['target_tag_name'] }.")
+
+          create_params = {
+            "Description": f"Snapshot of Volume ({ events['resource_id'] }). Created by Operations Conductor",
+            "VolumeId": events["resource_id"]
+          }
+
+          print(f"Volume ({ events['resource_id'] }) is still tagged with { events['target_tag_name'] }. Creating snapshot")
+          if events["copy_volume_tags"] == "true":
+            print("Also copying Volume tags to Snapshot")
+            create_params["TagSpecifications"] = [
+              {
+                "ResourceType": "snapshot",
+                "Tags": []
+              }
+            ]
+
+            for tag in volume_tags:
+              if not tag["Key"].startswith("aws:"):
+                create_params["TagSpecifications"][0]["Tags"].append(
+                  {
+                    "Key": tag["Key"],
+                    "Value": tag["Value"]
+                  }
+                )
+
+          snapshot = ec2_client.create_snapshot(**create_params)
+
+          print(f"Snapshot ({snapshot['SnapshotId']}) was created")
+
+          return  { 'statusCode': 200 }
+-   name: "REMOVE_MSG_FROM_RESOURCE_QUEUE"
+    action: "aws:executeAwsApi"
+    inputs: {
+      "Service": "sqs",
+      "Api": "DeleteMessage",
+      "QueueUrl": "%%ResourceQueueUrl%%",
+      "ReceiptHandle": "{{ SQSMsgReceiptHandle }}"
+    }
+-   name: "UPDATE_AUTOMATION_EXECUTION_RECORD"
+    action: aws:executeAwsApi
+    timeoutSeconds: 30
+    description: "Updates the record of this automation execution in the Operations Conductor Automation Executions Table to mark it as successfully completed"
+    inputs: {
+      "Service": "dynamodb",
+      "Api": "UpdateItem",
+      "TableName": "%%AutomationExecutionsTableName%%",
+      "Key": {
+        "parentExecutionId": { "S": "{{ VALIDATE_MSG_CONTENTS.parent_execution_id }}" },
+        "automationExecutionId": { "S": "{{ automation:EXECUTION_ID }}" }
+      },
+      "UpdateExpression": "SET #stat = :val1",
+      "ExpressionAttributeNames": {
+        "#stat": "status"
+      },
+      "ExpressionAttributeValues": {
+        ":val1": { "S": "Success" }
+      }
+    }
+-   name: "UPDATE_TASK_EXECUTIONS_RECORD"
+    action: aws:executeAwsApi
+    timeoutSeconds: 30
+    description: "Updates the record for the overall execution of the Operations Conductor Task that spawned this automation"
+    inputs: {
+      "Service": "dynamodb",
+      "Api": "UpdateItem",
+      "TableName": "%%TaskExecutionsTableName%%",
+      "Key": {
+        "taskId": { "S": "{{ VALIDATE_MSG_CONTENTS.task_id }}" },
+        "parentExecutionId": { "S": "{{ VALIDATE_MSG_CONTENTS.parent_execution_id }}" }
+      },
+      "UpdateExpression": "SET completedResourceCount = completedResourceCount + :incr, lastUpdateTime = :uptime",
+      "ExpressionAttributeValues": {
+        ":incr": { "N": "1" },
+        ":uptime": { "S": "{{ global:DATE_TIME }}" }
+      }
+    }
+-   name: "CHECK_FOR_TASK_EXECUTION_COMPLETION"
+    action: aws:executeAwsApi
+    timeoutSeconds: 30
+    description: "Marks the overall task execution as Success if all resources have been successfully acted on"
+    inputs: {
+      "Service": "dynamodb",
+      "Api": "UpdateItem",
+      "TableName": "%%TaskExecutionsTableName%%",
+      "Key": {
+        "taskId": { "S": "{{ VALIDATE_MSG_CONTENTS.task_id }}" },
+        "parentExecutionId": { "S": "{{ VALIDATE_MSG_CONTENTS.parent_execution_id }}" }
+      },
+      "UpdateExpression": "SET #s = :stat",
+      "ConditionExpression": "completedResourceCount = totalResourceCount",
+      "ExpressionAttributeNames": {
+        "#s": "status"
+      },
+      "ExpressionAttributeValues": {
+        ":stat": { "S": "Success" }
+      }
+    }
+    onFailure: Continue
+    isEnd: true
