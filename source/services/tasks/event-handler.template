@@ -79,7 +79,7 @@
             Description: "The Operations Conductor event forwarder"
             Handler: index.handler
             Role: !GetAtt EventForwarderRole.Arn
-            Runtime: nodejs10.x
+            Runtime: nodejs14.x
             MemorySize: 128
             Timeout: 15
             Environment:
@@ -91,7 +91,7 @@
             Code:
                 ZipFile: !Sub |
                     /*****************************************************************************
-                     * Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.   *
+                     * Copyright 2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.   *
                      *                                                                           *
                      * Licensed under the Apache License, Version 2.0 (the "License").           *
                      * You may not use this file except in compliance with the License.          *

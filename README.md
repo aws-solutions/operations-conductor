@@ -46,8 +46,16 @@ aws s3 cp $OPS_CO_PATH/deployment/regional-s3-assets/ s3://$DIST_OUTPUT_BUCKET-$
 * Get the link of the operations-conductor.template uploaded to your Amazon S3 bucket.
 * Deploy the Operations Conductor solution to your account by launching a new AWS CloudFormation stack using the link of the operations-conductor.template.
 
+## Collection of operational metrics
+This solution collects anonymous operational metrics to help AWS improve the quality and features of the solution. For more information, including how to disable this capability, please see the [implementation guide](https://docs.aws.amazon.com/solutions/latest/operations-conductor/appendix-f.html).
+
+
 ***
 
 Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
-This project is licensed under the terms of the Apache 2.0 license. See LICENSE. Included AWS Lambda functions are licensed under the MIT-0 license. See LICENSE.MIT-0.
+Licensed under the Apache License, Version 2.0 (the "License"). You may not use this file except in compliance with the License. A copy of the License is located at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+or in the "license" file accompanying this file. This file is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.

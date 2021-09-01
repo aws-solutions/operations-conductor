@@ -1,19 +1,18 @@
-/************************************************************************************
- * Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.          *
- *                                                                                  *
- * Permission is hereby granted, free of charge, to any person obtaining a copy of  *
- * this software and associated documentation files (the "Software"), to deal in    *
- * the Software without restriction, including without limitation the rights to     *
- * use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of *
- * the Software, and to permit persons to whom the Software is furnished to do so.  *
- *                                                                                  *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR       *
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS *
- * FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR   *
- * COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER   *
- * IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN          *
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.       *
- ***********************************************************************************/
+/*****************************************************************************
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.        *
+ *                                                                           *
+ * Licensed under the Apache License, Version 2.0 (the "License").           *
+ * You may not use this file except in compliance with the License.          *
+ * A copy of the License is located at                                       *
+ *                                                                           *
+ *     http://www.apache.org/licenses/LICENSE-2.0                            *
+ *                                                                           *
+ *  Unless required by applicable law or agreed to in writing, software      *
+ *  distributed under the License is distributed on an "AS IS" BASIS,        *
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. *
+ *  See the License for the specific language governing permissions and      *
+ *  limitations under the License.                                           *
+ ****************************************************************************/
 
 import { Context, Callback } from 'aws-lambda';
 import * as url from 'url';
@@ -59,7 +58,7 @@ export const handler = async (event: any, context: Context, callback: Callback) 
 
     try {
         if (event.ResourceType === 'Custom::CopyWebsite') {
-            if (event.RequestType === 'Create') {
+            if (event.RequestType === 'Create' ||  event.RequestType === 'Update')  {
                 const { SourceS3Bucket, SourceS3Key, SourceManifest, DestinationS3Bucket } = properties;
                 try {
                     responseData = await copyWebsite(SourceS3Bucket, SourceS3Key, SourceManifest, DestinationS3Bucket);
@@ -69,7 +68,7 @@ export const handler = async (event: any, context: Context, callback: Callback) 
                 }
             }
         } else if (event.ResourceType === 'Custom::PutWebsiteConfig') {
-            if (event.RequestType === 'Create') {
+            if (event.RequestType === 'Create' || event.RequestType === 'Update') {
                 const { Region, S3Bucket, S3Key, ConfigItem } = properties;
                 try {
                     let configFile = webConfig.replace(/REGION/g, Region)
@@ -100,9 +99,20 @@ export const handler = async (event: any, context: Context, callback: Callback) 
                 responseData = {
                     Message: result
                 };
+            } else if (event.RequestType === 'Update') {
+                const { StackName } = properties;
+                const ssm = new SSM(StackName, SSM_SLEEP_SECOND);
+                await ssm.deleteDocuments('custom-resource/ssm/');
+                const { StackNameNew, FilterTagKey, FilterTagValue } = properties;
+                const ssm_for_create = new SSM(StackNameNew, SSM_SLEEP_SECOND, FilterTagKey, FilterTagValue);
+                let createAgainResponse = await ssm_for_create.createDocuments('custom-resource/ssm/', properties);
+
+                responseData = {
+                    Message: createAgainResponse
+                };
             }
         } else if (event.ResourceType === 'Custom::UploadCloudFormationTemplates') {
-            if (event.RequestType === 'Create') {
+            if (event.RequestType === 'Create' || event.RequestType === 'Update') {
                 const { StackName, MasterAccount, CloudFormationBucket,
                     ResourceSelectorExecutionRoleArn, DocumentRoleArns, SolutionVersion } = properties;
                 try {
@@ -165,7 +175,7 @@ export const handler = async (event: any, context: Context, callback: Callback) 
                         FunctionName,
                         Role,
                         Handler: 'index.handler',
-                        Runtime: 'nodejs10.x',
+                        Runtime: 'nodejs14.x',
                         Description: 'Operations Conductor Lambda Edge function',
                         MemorySize: 128,
                         Timeout: 15
@@ -177,6 +187,37 @@ export const handler = async (event: any, context: Context, callback: Callback) 
                     throw Error('Creating Edge Lambda failed.');
                 }
 
+                // Publishes Edge Lambda version
+                try {
+                    let params: AWS.Lambda.PublishVersionRequest = {
+                        FunctionName: functionArn
+                    };
+                    let result = await lambda.publishVersion(params).promise();
+                    responseData = {
+                        FunctionArn: `${functionArn}:${result.Version}`
+                    };
+                } catch (error) {
+                    LOGGER.error('Publishing Edge Lambda version failed.', error);
+                    throw Error('Publishing Edge Lambda version failed.');
+                }
+            } else if (event.RequestType === 'Update') {
+                const lambda = new AWS.Lambda({ region: 'us-east-1' })
+                const { FunctionName, Role, Code } = properties;
+                let functionArn = '';
+                
+                try {
+                    //update lambda function runtime from nodejs10 to nodejs14.
+                    let updateResult = await lambda.updateFunctionConfiguration({
+                        FunctionName: FunctionName,
+                        Runtime: 'nodejs14.x'
+                    }).promise()
+                    functionArn = updateResult.FunctionArn;
+
+                    LOGGER.info("Lambda function " + FunctionName + ", updated runtime successfully, response: "+ JSON.stringify(updateResult))
+                } catch (error) {
+                    LOGGER.error('Lambda Edge update failed.', error);
+                    throw Error('Lambda Edge update failed.');
+                }
                 // Publishes Edge Lambda version
                 try {
                     let params: AWS.Lambda.PublishVersionRequest = {
@@ -237,6 +278,8 @@ export const handler = async (event: any, context: Context, callback: Callback) 
                     eventType = 'SolutionLaunched';
                 } else if (event.RequestType === 'Delete') {
                     eventType = 'SolutionDeleted';
+                } else if (event.RequestType === 'Update') {
+                    eventType = 'SolutionUpdated';
                 }
 
                 let metric = {

@@ -1,15 +1,16 @@
-# Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License").
 # You may not use this file except in compliance with the License.
-# A copy of the License is located at
+# You may obtain a copy of the License is located at
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 #
-# or in the "license" file accompanying this file. This file is distributed
-# on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
-# express or implied. See the License for the specific language governing
-# permissions and limitations under the License.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 AWSTemplateFormatVersion: "2010-09-09"
 Description: "(SO0065) - The AWS CloudFormation template for deployment of the %%SOLUTION_NAME%% Solution. Version %%VERSION%%"
@@ -250,6 +251,7 @@ Resources:
                         Action:
                             - "lambda:CreateFunction"
                             - "lambda:PublishVersion"
+                            - "lambda:UpdateFunctionConfiguration"
                         Resource:
                             - !Sub "arn:aws:lambda:us-east-1:${AWS::AccountId}:function:${AWS::StackName}-Lambda-Edge"
                     # To create/delete UserPoolClient by custom resource
@@ -1338,9 +1340,10 @@ Resources:
         Metadata:
             cfn_nag:
                 rules_to_suppress:
-                    -
-                        id: W45
-                        reason: "This solution does not require API Gateway access logging."
+                    - id: W45
+                      reason: "This solution does not require API Gateway access logging."
+                    - id: W68
+                      reason: "The solution has a very small footprint in the API gateway, only the solution's UI uses the end points which have limited usage scenarios."
 
     # Lambda Functions
     CustomResourceLambda:
@@ -1352,12 +1355,21 @@ Resources:
                 S3Key: !Join ["/", [!FindInMap ["SourceCode", "General", "KeyPrefix"],  "operations-conductor-services.zip"]]
             Handler: custom-resource/index.handler
             Role: !GetAtt CustomResourceRole.Arn
-            Runtime: nodejs10.x
+            Runtime: nodejs14.x
             MemorySize: 256
             Timeout: 300
             Environment:
                 Variables:
                     LogLevel: !Ref LogLevel
+        Metadata:
+            cfn_nag:
+                rules_to_suppress:
+                - id: W58
+                  reason: "Lambda functions have permission to write to logs in CustomResourcePolicy."
+                - id: W89
+                  reason: "This Lambda function does not need to access any resource provisioned within a VPC."
+                - id: W92
+                  reason: "This Lambda function does not need to reserved concurrency."
 
     UserServiceLambda:
         Type: AWS::Lambda::Function
@@ -1368,7 +1380,7 @@ Resources:
                 S3Key: !Join ["/", [!FindInMap ["SourceCode", "General", "KeyPrefix"],  "operations-conductor-services.zip"]]
             Handler: users/index.handler
             Role: !GetAtt UserServiceRole.Arn
-            Runtime: nodejs10.x
+            Runtime: nodejs14.x
             MemorySize: 256
             Timeout: 60
             Environment:
@@ -1379,6 +1391,15 @@ Resources:
                     SolutionVersion: !FindInMap ["Solution", "Data", "Version"]
                     SolutionUuid: !GetAtt CustomResourceAppUuid.UUID
                     LogLevel: !Ref LogLevel
+        Metadata:
+            cfn_nag:
+                rules_to_suppress:
+                - id: W58
+                  reason: "Lambda functions have permission to write to logs in UserServicePolicy."
+                - id: W89
+                  reason: "This Lambda function does not need to access any resource provisioned within a VPC."
+                - id: W92
+                  reason: "This Lambda function does not need to reserved concurrency."
 
     TaskServiceLambda:
         Type: AWS::Lambda::Function
@@ -1389,7 +1410,7 @@ Resources:
                 S3Key: !Join ["/", [!FindInMap ["SourceCode", "General", "KeyPrefix"],  "operations-conductor-services.zip"]]
             Handler: tasks/index.handler
             Role: !GetAtt TaskServiceRole.Arn
-            Runtime: nodejs10.x
+            Runtime: nodejs14.x
             MemorySize: 256
             Timeout: 60
             Environment:
@@ -1408,6 +1429,15 @@ Resources:
                     MasterKmsArn: !GetAtt SnsEncryptionKey.Arn
                     Region: !Ref "AWS::Region"
                     LogLevel: !Ref LogLevel
+        Metadata:
+            cfn_nag:
+                rules_to_suppress:
+                - id: W58
+                  reason: "Lambda functions have permission to write to logs in TaskServicePolicy."
+                - id: W89
+                  reason: "This Lambda function does not need to access any resource provisioned within a VPC."
+                - id: W92
+                  reason: "This Lambda function does not need to reserved concurrency." 
 
     ActionServiceLambda:
         Type: AWS::Lambda::Function
@@ -1418,7 +1448,7 @@ Resources:
                 S3Key: !Join ["/", [!FindInMap ["SourceCode", "General", "KeyPrefix"],  "operations-conductor-services.zip"]]
             Handler: actions/index.handler
             Role: !GetAtt ActionServiceRole.Arn
-            Runtime: nodejs10.x
+            Runtime: nodejs14.x
             MemorySize: 128
             Timeout: 15
             Environment:
@@ -1426,6 +1456,15 @@ Resources:
                     FilterTagKey: !Ref DocumentTagKey
                     FilterTagValue: !Ref DocumentTagValue
                     LogLevel: !Ref LogLevel
+        Metadata:
+            cfn_nag:
+                rules_to_suppress:
+                    - id: W58
+                      reason: "Lambda functions have permission to write to logs in ActionServicePolicy."
+                    - id: W89
+                      reason: "This Lambda function does not need to access any resource provisioned within a VPC."
+                    - id: W92
+                      reason: "This Lambda function does not need to reserved concurrency."
 
     ConsumerLambda:
         Type: AWS::Lambda::Function
@@ -1436,12 +1475,21 @@ Resources:
                 S3Key: !Join ["/", [!FindInMap ["SourceCode", "General", "KeyPrefix"],  "operations-conductor-services.zip"]]
             Handler: queue-consumer/index.handler
             Role: !GetAtt ConsumerLambdaExecutionRole.Arn
-            Runtime: nodejs10.x
+            Runtime: nodejs14.x
             Timeout: 15
             MemorySize: 128
             Environment:
                 Variables:
                     LogLevel: !Ref LogLevel
+        Metadata:
+            cfn_nag:
+                rules_to_suppress:
+                    - id: W58
+                      reason: "Lambda functions have permission to write to logs in ConsumerLambdaExecutionPolicy."
+                    - id: W89
+                      reason: "This Lambda function does not need to access any resource provisioned within a VPC."
+                    - id: W92
+                      reason: "This Lambda function does not need to reserved concurrency."
 
     ResourceSelectorLambda:
         Type: AWS::Lambda::Function
@@ -1452,7 +1500,7 @@ Resources:
                 S3Key: !Join ["/", [!FindInMap ["SourceCode", "General", "KeyPrefix"],  "operations-conductor-services.zip"]]
             Handler: resource-selector/index.handler
             Role: !GetAtt ResourceSelectorExecutionRole.Arn
-            Runtime: nodejs10.x
+            Runtime: nodejs14.x
             Timeout: 15
             MemorySize: 128
             Environment:
@@ -1464,6 +1512,15 @@ Resources:
                     SolutionVersion: !FindInMap ["Solution", "Data", "Version"]
                     SolutionUuid: !GetAtt CustomResourceAppUuid.UUID
                     LogLevel: !Ref LogLevel
+        Metadata:
+            cfn_nag:
+                rules_to_suppress:
+                    - id: W58
+                      reason: "Lambda functions have permission to write to logs in ResourceSelectorExecutionPolicy."
+                    - id: W89
+                      reason: "This Lambda function does not need to access any resource provisioned within a VPC."
+                    - id: W92
+                      reason: "This Lambda function does not need to reserved concurrency."
 
     # Cognito UserPool
     UserPool:
@@ -1680,9 +1737,10 @@ Resources:
         Metadata:
             cfn_nag:
                 rules_to_suppress:
-                    -
-                        id: W10
-                        reason: "This solution does not require CloudFront distribution access logging."
+                    - id: W10
+                      reason: "This solution does not require CloudFront distribution access logging."
+                    - id: W70
+                      reason: "If the distribution uses the CloudFront domain name such as d111111abcdef8.cloudfront.net (you set CloudFrontDefaultCertificate to true), CloudFront automatically sets the security policy to TLSv1 regardless of the value that you set here. refer https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-cloudfront-distribution-viewercertificate.html"
 
     WebsiteOriginAccessIdentity:
         Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
@@ -1706,6 +1764,8 @@ Resources:
                     KeyType: "HASH"
             SSESpecification:
                 SSEEnabled: true
+            PointInTimeRecoverySpecification:
+                PointInTimeRecoveryEnabled: true
 
     TaskExecutionsTable:
         Type: AWS::DynamoDB::Table
@@ -1743,6 +1803,8 @@ Resources:
                         ProjectionType: "ALL"
             SSESpecification:
                 SSEEnabled: true
+            PointInTimeRecoverySpecification:
+                PointInTimeRecoveryEnabled: true
 
     AutomationExecutionsTable:
         Type: AWS::DynamoDB::Table
@@ -1765,6 +1827,8 @@ Resources:
                     KeyType: "RANGE"
             SSESpecification:
                 SSEEnabled: true
+            PointInTimeRecoverySpecification:
+                PointInTimeRecoveryEnabled: true
 
     # SQS
     DeadLetterQueue:
