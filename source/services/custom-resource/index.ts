@@ -186,12 +186,30 @@ export const handler = async (event: any, context: Context, callback: Callback) 
                     LOGGER.error('Creating Edge Lambda failed.', error);
                     throw Error('Creating Edge Lambda failed.');
                 }
-
+                
                 // Publishes Edge Lambda version
                 try {
+                    let isFunctionStateActive = false
+                    let retry = 0
+                    let delayinMilliseconds = 5000;
+                    while (!isFunctionStateActive) {
+                        let response = await lambda.getFunctionConfiguration({
+                            FunctionName: functionArn
+                        }).promise();
+                        LOGGER.debug(`Response from get function configuration ${JSON.stringify(response)}`)
+                        if(response.State === 'Active' || retry > 10) {
+                            isFunctionStateActive = true
+                        } else {
+                            await waitForTime(delayinMilliseconds)
+                            retry++
+                            delayinMilliseconds += 5000;
+                        }
+                    }
+
                     let params: AWS.Lambda.PublishVersionRequest = {
                         FunctionName: functionArn
                     };
+
                     let result = await lambda.publishVersion(params).promise();
                     responseData = {
                         FunctionArn: `${functionArn}:${result.Version}`
@@ -220,9 +238,27 @@ export const handler = async (event: any, context: Context, callback: Callback) 
                 }
                 // Publishes Edge Lambda version
                 try {
+                    let isFunctionStateActive = false
+                    let retry = 0
+                    let delayinMilliseconds = 5000
+                    while (!isFunctionStateActive) {
+                        let response = await lambda.getFunctionConfiguration({
+                            FunctionName: functionArn
+                        }).promise();
+                        LOGGER.debug(`Response from get function configuration ${JSON.stringify(response)}`)
+                        if(response.State === 'Active' || retry > 10) {
+                            isFunctionStateActive = true
+                        } else {
+                            await waitForTime(delayinMilliseconds)
+                            retry++
+                            delayinMilliseconds += 5000;
+                        }
+                    }
+
                     let params: AWS.Lambda.PublishVersionRequest = {
                         FunctionName: functionArn
                     };
+                    
                     let result = await lambda.publishVersion(params).promise();
                     responseData = {
                         FunctionArn: `${functionArn}:${result.Version}`
@@ -498,4 +534,11 @@ const sendResponse = async (event: any, callback: Function, logStreamName: strin
         LOGGER.error('Custom resource sendResponse error', error);
         callback(error);
     }
+};
+
+/** Function to add delay for waiting on process. 
+ * @param ms time in milliseconds
+*/
+const waitForTime = async (ms: number) => {
+    return new Promise(resolve => setTimeout(resolve, ms));
 };
