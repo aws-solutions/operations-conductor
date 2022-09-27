@@ -1,0 +1,27 @@
+name: Pull Request Workflow
+
+env:
+  REGION: us-east-1
+
+on: 
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+jobs:
+  pull-request-job:
+    name: AWS Status Checks
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          role-to-assume: ${{ secrets.PR_ROLE_ARN }}
+          aws-region: ${{ env.REGION }}
+          role-duration-seconds: 900
+          role-session-name: OIDCSession
+      - name: Run CodeBuild
+        uses: aws-actions/aws-codebuild-run-build@v1
+        with:
+          project-name: ${{ secrets.PR_CODEBUILD_PROJECT_NAME }}
