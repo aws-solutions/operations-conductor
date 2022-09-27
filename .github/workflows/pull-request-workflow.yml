@@ -1,27 +1,32 @@
 name: Pull Request Workflow
 
-env:
-  REGION: us-east-1
-
 on: 
   pull_request:
     types: [opened, edited, reopened, synchronize]
 
 jobs:
   pull-request-job:
-    name: AWS Status Checks
+    name: Status Checks
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write
     steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1
-        with:
-          role-to-assume: ${{ secrets.PR_ROLE_ARN }}
-          aws-region: ${{ env.REGION }}
-          role-duration-seconds: 900
-          role-session-name: OIDCSession
-      - name: Run CodeBuild
-        uses: aws-actions/aws-codebuild-run-build@v1
-        with:
-          project-name: ${{ secrets.PR_CODEBUILD_PROJECT_NAME }}
+      - name: Viperlight
+        run: |
+          wget -q https://viperlight-scanner.s3.amazonaws.com/latest/.viperlightrc
+          wget -q https://viperlight-scanner.s3.amazonaws.com/latest/codescan-funcs.sh
+          wget -q https://viperlight-scanner.s3.amazonaws.com/latest/codescan-postbuild-default.sh
+          wget -q https://viperlight-scanner.s3.amazonaws.com/latest/viperlight.zip
+          unzip -q viperlight.zip -d ../viperlight
+          rm -r ./viperlight.zip
+          default_scan="./codescan-postbuild-default.sh"
+          if [ -f "$default_scan" ]; then
+            chmod +x $default_scan
+          else
+            default_scan = "viperlight scan"
+          fi
+          custom_scancmd=./codescan-postbuild-custom.sh
+          if [ -f "$custom_scancmd" ]; then
+            chmod +x $custom_scancmd
+            $custom_scancmd
+          else
+            $default_scan
+          fi
