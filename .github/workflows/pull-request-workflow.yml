@@ -1,3 +1,4 @@
+
 name: Pull Request Workflow
 
 on: 
@@ -12,21 +13,10 @@ jobs:
       - name: Viperlight
         run: |
           wget -q https://viperlight-scanner.s3.amazonaws.com/latest/.viperlightrc
-          wget -q https://viperlight-scanner.s3.amazonaws.com/latest/codescan-funcs.sh
-          wget -q https://viperlight-scanner.s3.amazonaws.com/latest/codescan-postbuild-default.sh
           wget -q https://viperlight-scanner.s3.amazonaws.com/latest/viperlight.zip
           unzip -q viperlight.zip -d ../viperlight
           rm -r ./viperlight.zip
-          default_scan="./codescan-postbuild-default.sh"
-          if [ -f "$default_scan" ]; then
-            chmod +x $default_scan
-          else
-            default_scan = "viperlight scan"
-          fi
-          custom_scancmd=./codescan-postbuild-custom.sh
-          if [ -f "$custom_scancmd" ]; then
-            chmod +x $custom_scancmd
-            $custom_scancmd
-          else
-            $default_scan
-          fi
+          echo "Content scanning utility installation complete `date`"
+          echo "Starting content scanning `date` in `pwd`"
+          ../viperlight/bin/viperlight scan -m files-contents -m files-aws -m files-binary -m files-entropy -m files-secrets
+          echo "Completed content scanning `date`"
