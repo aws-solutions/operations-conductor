@@ -5,7 +5,7 @@ Operations Conductor on AWS is a framework that provides an easy-to-use interfac
 ## Running unit tests for customization
 * Clone the repository, then make the desired code changes.
 ```bash
-git clone https://github.com/awslabs/operations-conductor.git
+git clone https://github.com/aws-solutions/operations-conductor.git
 cd operations-conductor
 export OPS_CO_PATH=`pwd`
 ```
