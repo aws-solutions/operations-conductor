@@ -898,7 +898,7 @@ class TaskCreate extends React.Component<IProps, IState> {
 												event.persist();
 												this.handleAccountsChange(event);
 											}} />
-                                        <HelpBlock>List of accounts in which Operations Conductor should operate. Requires 12 digit account IDs</HelpBlock>
+                                        <HelpBlock>List of accounts in which Operations Conductor on AWS should operate. Requires 12 digit account IDs</HelpBlock>
                                         {
                                             this.state.showHelp.accounts &&
                                             <HelpBlock>Accounts cannot be empty.</HelpBlock>
@@ -916,7 +916,7 @@ class TaskCreate extends React.Component<IProps, IState> {
 												this.handleRegionsChange(event);
 											}} />
                                         <HelpBlock>
-                                            List of regions in which Operations Conductor should operate. Requires region codes (e.g. us-east-1). <a href="https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/using-regions-availability-zones.html#concepts-available-regions" target="_blank" rel="noopener noreferrer">See more</a> about the available region codes.
+                                            List of regions in which Operations Conductor on AWS should operate. Requires region codes (e.g. us-east-1). <a href="https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/using-regions-availability-zones.html#concepts-available-regions" target="_blank" rel="noopener noreferrer">See more</a> about the available region codes.
                                         </HelpBlock>
                                         {
                                             this.state.showHelp.accounts &&

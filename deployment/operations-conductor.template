@@ -13,7 +13,7 @@
 # limitations under the License.
 
 AWSTemplateFormatVersion: "2010-09-09"
-Description: "(SO0065) - The AWS CloudFormation template for deployment of the %%SOLUTION_NAME%% Solution. Version %%VERSION%%"
+Description: "(SO0065) - The AWS CloudFormation template for deployment of the Operations Conductor on AWS Solution. Version %%VERSION%%"
 
 Parameters:
     DocumentTagKey:

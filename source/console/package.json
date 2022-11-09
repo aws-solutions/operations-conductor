@@ -1,7 +1,7 @@
 {
     "name": "operations-conductor-console",
     "description": "The Operations Conductor Web console",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "private": true,
     "dependencies": {
         "aws-amplify": "^1.2.3",

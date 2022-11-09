@@ -74,7 +74,7 @@ class App extends React.Component<IProps, IState> {
                     <Router>
                         <Navbar>
                             <Navbar.Header>
-                                <Navbar.Brand>Operations Conductor</Navbar.Brand>
+                                <Navbar.Brand>Operations Conductor on AWS</Navbar.Brand>
                             </Navbar.Header>
                             <Nav>
                                 <LinkContainer to="/tasks">

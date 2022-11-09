@@ -87,13 +87,14 @@ describe('Actions', () => {
         });
 
         test('returns a success response', (done) => {
-            mockSsm.mockImplementationOnce(() => {
+            mockSsm.mockImplementationOnce((data) => {
+                expect(data).toStrictEqual({"Filters":[{"Key":"tag:SomeKey","Values":["SomeValue"]},{"Key":"Owner","Values":["Self"]}]})
                 return {
                     promise() {
                         return Promise.resolve(mockDocuments);
                     }
                 };
-            }).mockImplementationOnce(() => {
+            }).mockImplementationOnce((data) => {
                 return {
                     promise() {
                         return Promise.resolve(mockDocument);
@@ -113,7 +114,8 @@ describe('Actions', () => {
             let documentsWithNextToken = mockDocuments;
             documentsWithNextToken['NextToken'] = 'token';
 
-            mockSsm.mockImplementationOnce(() => {
+            mockSsm.mockImplementationOnce((data) => {
+                expect(data).toStrictEqual({"Filters":[{"Key":"tag:SomeKey","Values":["SomeValue"]},{"Key":"Owner","Values":["Self"]}]})
                 return {
                     promise() {
                         return Promise.resolve(documentsWithNextToken);
@@ -149,7 +151,8 @@ describe('Actions', () => {
         });
 
         test('returns an error when getting actions fails', (done) => {
-            mockSsm.mockImplementation(() => {
+            mockSsm.mockImplementation((data) => {
+                expect(data).toStrictEqual({"Filters":[{"Key":"tag:SomeKey","Values":["SomeValue"]},{"Key":"Owner","Values":["Self"]}]})
                 return {
                     promise() {
                         return Promise.reject('error');

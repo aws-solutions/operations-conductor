@@ -71,6 +71,12 @@ export class Action {
                         Values: [
                             this.filterTagValue
                         ]
+                    },
+                    {
+                        Key: `Owner`,
+                        Values: [
+                            `Self`
+                        ]
                     }
                 ]
             };
