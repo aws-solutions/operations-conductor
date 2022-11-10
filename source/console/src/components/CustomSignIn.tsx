@@ -41,7 +41,7 @@ class CustomSignIn extends SignIn {
             <div className="main-wrapper">
                 <Navbar>
                     <Navbar.Header>
-                        <Navbar.Brand>Operations Conductor</Navbar.Brand>
+                        <Navbar.Brand>Operations Conductor on AWS</Navbar.Brand>
                     </Navbar.Header>
                 </Navbar>
                 <Grid>

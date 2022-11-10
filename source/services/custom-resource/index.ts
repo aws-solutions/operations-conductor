@@ -246,7 +246,7 @@ export const handler = async (event: any, context: Context, callback: Callback) 
                             FunctionName: functionArn
                         }).promise();
                         LOGGER.debug(`Response from get function configuration ${JSON.stringify(response)}`)
-                        if(response.State === 'Active' || retry > 10) {
+                        if((response.State === 'Active' && response.LastUpdateStatus === 'Successful') || retry > 10) {
                             isFunctionStateActive = true
                         } else {
                             await waitForTime(delayinMilliseconds)

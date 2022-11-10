@@ -46,7 +46,7 @@ class CustomForgotPassword extends ForgotPassword {
             <div className="main-wrapper">
                 <Navbar>
                     <Navbar.Header>
-                        <Navbar.Brand>Operations Conductor</Navbar.Brand>
+                        <Navbar.Brand>Operations Conductor on AWS</Navbar.Brand>
                     </Navbar.Header>
                 </Navbar>
                 <Grid>
