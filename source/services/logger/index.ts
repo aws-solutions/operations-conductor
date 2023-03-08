@@ -1,3 +1,8 @@
+/*
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 import { LoggerFactoryOptions, LFService, LogGroupRule, LogLevel, LogFormat, DateFormat } from 'typescript-logging';
 
 let logLevel = LogLevel.Info;

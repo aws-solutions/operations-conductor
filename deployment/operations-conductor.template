@@ -1,16 +1,7 @@
+#
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
 #
-# Licensed under the Apache License, Version 2.0 (the "License").
-# You may not use this file except in compliance with the License.
-# You may obtain a copy of the License is located at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 
 AWSTemplateFormatVersion: "2010-09-09"
 Description: "(SO0065) - The AWS CloudFormation template for deployment of the Operations Conductor on AWS Solution. Version %%VERSION%%"
@@ -31,8 +22,8 @@ Parameters:
         AllowedPattern: ".+"
     AdministratorEmail:
         Type: String
-        Description: (Required) Email address for the Operations Conductor administrator.
-        AllowedPattern: "^[_A-Za-z0-9-\\+]+(\\.[_A-Za-z0-9-]+)*@[A-Za-z0-9-]+(\\.[A-Za-z0-9]+)*(\\.[A-Za-z]{2,})$"
+        Description: (Required) Email address for the Operations Conductor administrator - must be all lowercase.
+        AllowedPattern: "^[_a-z0-9-\\+]+(\\.[_a-z0-9-]+)*@[a-z0-9-]+(\\.[a-z0-9]+)*(\\.[a-z]{2,})$"
     LogLevel:
         Type: String
         Description: (Required) Microservice log level (Trace = 0, Debug = 1, Info = 2, Warn = 3, Error = 4, Fatal = 5)
@@ -682,6 +673,41 @@ Resources:
                         id: W13
                         reason: "The * resource allows the Ops Conductor Automation Documents to assume a roles within other accounts that grant specific permissions depending on the action."
 
+    APIGatewayCloudWatchLoggingRole:
+        Type: AWS::IAM::Role
+        Description: "Rule for the Operations Conductor API Gateway cloudwatch logs."
+        Properties:
+            AssumeRolePolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                  - Effect: "Allow"
+                    Principal:
+                        Service:
+                            - "apigateway.amazonaws.com"
+                    Action:
+                            - "sts:AssumeRole"
+            Path: "/"
+
+    APIGatewayCloudWatchLoggingPolicy:
+        Type: AWS::IAM::ManagedPolicy
+        Properties:
+            Description: "Policy for the Operations Conductor API Gateway logging role."
+            PolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                    - Effect: "Allow"
+                      Action:
+                          - "logs:CreateLogGroup"
+                          - "logs:CreateLogStream"
+                          - "logs:DescribeLogGroups"
+                          - "logs:DescribeLogStreams"
+                          - "logs:PutLogEvents"
+                          - "logs:GetLogEvents"
+                          - "logs:FilterLogEvents"
+                      Resource: "*"
+            Roles:
+                - !Ref APIGatewayCloudWatchLoggingRole
+
     EventSnsResourceSelectorExecutionPermission:
         Type: AWS::Lambda::Permission
         Properties:
@@ -731,9 +757,22 @@ Resources:
                         id: W13
                         reason: "The * resource allows to create CloudWatch logs."
 
+    # CloudWatch Log Group for API Gateway
+
+    APIGatewayAccessLogs:
+        Type: AWS::Logs::LogGroup
+        Metadata:
+            cfn_nag:
+                rules_to_suppress:
+                    - id: W45
+                      reason: "This solution does not require API Gateway access logging."
+
+
     # API Gateway
     ApiGateway:
         Type: AWS::ApiGateway::RestApi
+        DependsOn: 
+            - APIGatewayCloudWatchLoggingRole
         Properties:
             Body:
                 swagger: "2.0"
@@ -775,7 +814,7 @@ Resources:
                                         responseParameters:
                                             method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS,POST'"
                                             method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
-                                            method.response.header.Access-Control-Allow-Origin: "'*'"
+                                            method.response.header.Access-Control-Allow-Origin: !Join ["", ["'https://", !GetAtt WebsiteDistribution.DomainName, "'"]]
                                 requestTemplates:
                                     application/json: "{\"statusCode\": 200}"
                                 passthroughBehavior: "when_no_match"
@@ -826,7 +865,7 @@ Resources:
                                         responseParameters:
                                             method.response.header.Access-Control-Allow-Methods: "'DELETE,OPTIONS,PUT'"
                                             method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
-                                            method.response.header.Access-Control-Allow-Origin: "'*'"
+                                            method.response.header.Access-Control-Allow-Origin: !Join ["", ["'https://", !GetAtt WebsiteDistribution.DomainName, "'"]]
                                 requestTemplates:
                                     application/json: "{\"statusCode\": 200}"
                                 passthroughBehavior: "when_no_match"
@@ -883,7 +922,7 @@ Resources:
                                         responseParameters:
                                             method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS,POST'"
                                             method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
-                                            method.response.header.Access-Control-Allow-Origin: "'*'"
+                                            method.response.header.Access-Control-Allow-Origin: !Join ["", ["'https://", !GetAtt WebsiteDistribution.DomainName, "'"]]
                                 requestTemplates:
                                     application/json: "{\"statusCode\": 200}"
                                 passthroughBehavior: "when_no_match"
@@ -934,7 +973,7 @@ Resources:
                                         responseParameters:
                                             method.response.header.Access-Control-Allow-Methods: "'DELETE,GET,OPTIONS,PUT'"
                                             method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
-                                            method.response.header.Access-Control-Allow-Origin: "'*'"
+                                            method.response.header.Access-Control-Allow-Origin: !Join ["", ["'https://", !GetAtt WebsiteDistribution.DomainName, "'"]]
                                 requestTemplates:
                                     application/json: "{\"statusCode\": 200}"
                                 passthroughBehavior: "when_no_match"
@@ -991,7 +1030,7 @@ Resources:
                                         responseParameters:
                                             method.response.header.Access-Control-Allow-Methods: "'OPTIONS,PUT'"
                                             method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
-                                            method.response.header.Access-Control-Allow-Origin: "'*'"
+                                            method.response.header.Access-Control-Allow-Origin: !Join ["", ["'https://", !GetAtt WebsiteDistribution.DomainName, "'"]]
                                 requestTemplates:
                                     application/json: "{\"statusCode\": 200}"
                                 passthroughBehavior: "when_no_match"
@@ -1048,7 +1087,7 @@ Resources:
                                         responseParameters:
                                             method.response.header.Access-Control-Allow-Methods: "'OPTIONS,POST'"
                                             method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
-                                            method.response.header.Access-Control-Allow-Origin: "'*'"
+                                            method.response.header.Access-Control-Allow-Origin: !Join ["", ["'https://", !GetAtt WebsiteDistribution.DomainName, "'"]]
                                 requestTemplates:
                                     application/json: "{\"statusCode\": 200}"
                                 passthroughBehavior: "when_no_match"
@@ -1105,7 +1144,7 @@ Resources:
                                         responseParameters:
                                             method.response.header.Access-Control-Allow-Methods: "'OPTIONS,POST'"
                                             method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
-                                            method.response.header.Access-Control-Allow-Origin: "'*'"
+                                            method.response.header.Access-Control-Allow-Origin: !Join ["", ["'https://", !GetAtt WebsiteDistribution.DomainName, "'"]]
                                 requestTemplates:
                                     application/json: "{\"statusCode\": 200}"
                                 passthroughBehavior: "when_no_match"
@@ -1167,7 +1206,7 @@ Resources:
                                         responseParameters:
                                             method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
                                             method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
-                                            method.response.header.Access-Control-Allow-Origin: "'*'"
+                                            method.response.header.Access-Control-Allow-Origin: !Join ["", ["'https://", !GetAtt WebsiteDistribution.DomainName, "'"]]
                                 requestTemplates:
                                     application/json: "{\"statusCode\": 200}"
                                 passthroughBehavior: "when_no_match"
@@ -1234,7 +1273,7 @@ Resources:
                                         responseParameters:
                                             method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
                                             method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
-                                            method.response.header.Access-Control-Allow-Origin: "'*'"
+                                            method.response.header.Access-Control-Allow-Origin: !Join ["", ["'https://", !GetAtt WebsiteDistribution.DomainName, "'"]]
                                 requestTemplates:
                                     application/json: "{\"statusCode\": 200}"
                                 passthroughBehavior: "when_no_match"
@@ -1285,7 +1324,7 @@ Resources:
                                         responseParameters:
                                             method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
                                             method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
-                                            method.response.header.Access-Control-Allow-Origin: "'*'"
+                                            method.response.header.Access-Control-Allow-Origin: !Join ["", ["'https://", !GetAtt WebsiteDistribution.DomainName, "'"]]
                                 requestTemplates:
                                     application/json: "{\"statusCode\": 200}"
                                 passthroughBehavior: "when_no_match"
@@ -1334,17 +1373,32 @@ Resources:
 
     ApiGatewayDeployment:
         Type: AWS::ApiGateway::Deployment
+        DependsOn: 
+            - APIGatewayAccessLogs
+            - APIGatewayCloudWatchLoggingRole
         Properties:
             RestApiId: !Ref ApiGateway
             Description: "Production"
             StageName: "prod"
+            StageDescription:
+                LoggingLevel: INFO
+                AccessLogSetting:
+                    DestinationArn: !GetAtt APIGatewayAccessLogs.Arn
+                    Format: >-
+                        { "requestId":"$context.requestId", "ip": "$context.identity.sourceIp", "caller":"$context.identity.caller", "user":"$context.identity.user","requestTime":"$context.requestTime", "httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath", "status":"$context.status","protocol":"$context.protocol", "responseLength":"$context.responseLength" }
         Metadata:
             cfn_nag:
                 rules_to_suppress:
-                    - id: W45
-                      reason: "This solution does not require API Gateway access logging."
                     - id: W68
                       reason: "The solution has a very small footprint in the API gateway, only the solution's UI uses the end points which have limited usage scenarios."
+
+    ApiGatewayAccount:
+        Type: AWS::ApiGateway::Account
+        DependsOn: 
+            - APIGatewayCloudWatchLoggingRole
+            - ApiGateway
+        Properties:
+            CloudWatchRoleArn: !GetAtt APIGatewayCloudWatchLoggingRole.Arn
 
     # Lambda Functions
     CustomResourceLambda:
@@ -1356,7 +1410,7 @@ Resources:
                 S3Key: !Join ["/", [!FindInMap ["SourceCode", "General", "KeyPrefix"],  "operations-conductor-services.zip"]]
             Handler: custom-resource/index.handler
             Role: !GetAtt CustomResourceRole.Arn
-            Runtime: nodejs14.x
+            Runtime: nodejs16.x
             MemorySize: 256
             Timeout: 300
             Environment:
@@ -1381,7 +1435,7 @@ Resources:
                 S3Key: !Join ["/", [!FindInMap ["SourceCode", "General", "KeyPrefix"],  "operations-conductor-services.zip"]]
             Handler: users/index.handler
             Role: !GetAtt UserServiceRole.Arn
-            Runtime: nodejs14.x
+            Runtime: nodejs16.x
             MemorySize: 256
             Timeout: 60
             Environment:
@@ -1392,6 +1446,7 @@ Resources:
                     SolutionVersion: !FindInMap ["Solution", "Data", "Version"]
                     SolutionUuid: !GetAtt CustomResourceAppUuid.UUID
                     LogLevel: !Ref LogLevel
+                    CorsAllowedOrigins: !Join ["", ["https://", !GetAtt WebsiteDistribution.DomainName]]
         Metadata:
             cfn_nag:
                 rules_to_suppress:
@@ -1411,7 +1466,7 @@ Resources:
                 S3Key: !Join ["/", [!FindInMap ["SourceCode", "General", "KeyPrefix"],  "operations-conductor-services.zip"]]
             Handler: tasks/index.handler
             Role: !GetAtt TaskServiceRole.Arn
-            Runtime: nodejs14.x
+            Runtime: nodejs16.x
             MemorySize: 256
             Timeout: 60
             Environment:
@@ -1430,6 +1485,7 @@ Resources:
                     MasterKmsArn: !GetAtt SnsEncryptionKey.Arn
                     Region: !Ref "AWS::Region"
                     LogLevel: !Ref LogLevel
+                    CorsAllowedOrigins: !Join ["", ["https://", !GetAtt WebsiteDistribution.DomainName]]
         Metadata:
             cfn_nag:
                 rules_to_suppress:
@@ -1449,7 +1505,7 @@ Resources:
                 S3Key: !Join ["/", [!FindInMap ["SourceCode", "General", "KeyPrefix"],  "operations-conductor-services.zip"]]
             Handler: actions/index.handler
             Role: !GetAtt ActionServiceRole.Arn
-            Runtime: nodejs14.x
+            Runtime: nodejs16.x
             MemorySize: 128
             Timeout: 15
             Environment:
@@ -1457,6 +1513,7 @@ Resources:
                     FilterTagKey: !Ref DocumentTagKey
                     FilterTagValue: !Ref DocumentTagValue
                     LogLevel: !Ref LogLevel
+                    CorsAllowedOrigins: !Join ["", ["https://", !GetAtt WebsiteDistribution.DomainName]]
         Metadata:
             cfn_nag:
                 rules_to_suppress:
@@ -1476,7 +1533,7 @@ Resources:
                 S3Key: !Join ["/", [!FindInMap ["SourceCode", "General", "KeyPrefix"],  "operations-conductor-services.zip"]]
             Handler: queue-consumer/index.handler
             Role: !GetAtt ConsumerLambdaExecutionRole.Arn
-            Runtime: nodejs14.x
+            Runtime: nodejs16.x
             Timeout: 15
             MemorySize: 128
             Environment:
@@ -1501,7 +1558,7 @@ Resources:
                 S3Key: !Join ["/", [!FindInMap ["SourceCode", "General", "KeyPrefix"],  "operations-conductor-services.zip"]]
             Handler: resource-selector/index.handler
             Role: !GetAtt ResourceSelectorExecutionRole.Arn
-            Runtime: nodejs14.x
+            Runtime: nodejs16.x
             Timeout: 15
             MemorySize: 128
             Environment:
@@ -1528,6 +1585,8 @@ Resources:
         Type: AWS::Cognito::UserPool
         Properties:
             UserPoolName: "operations-conductor-userpool"
+            UserPoolAddOns: 
+                AdvancedSecurityMode: "ENFORCED"
             AdminCreateUserConfig:
                 AllowAdminCreateUserOnly: True
                 InviteMessageTemplate:
@@ -1692,10 +1751,34 @@ Resources:
                             - !Join ["/", [!GetAtt CloudFormationBucket.Arn, "*"]]
                         Principal:
                             AWS: !GetAtt TaskServiceRole.Arn
+    
+    SolutionAccessLoggingBucket:
+        Type: AWS::S3::Bucket
+        DeletionPolicy: Retain
+        Properties:
+            PublicAccessBlockConfiguration:
+                BlockPublicAcls: True
+                BlockPublicPolicy: True
+                IgnorePublicAcls: True
+                RestrictPublicBuckets: True
+            BucketEncryption:
+                ServerSideEncryptionConfiguration:
+                    -
+                        ServerSideEncryptionByDefault:
+                            SSEAlgorithm: AES256
+            AccessControl: "LogDeliveryWrite"
+        Metadata:
+            cfn_nag:
+                rules_to_suppress:
+                    -
+                        id: W35
+                        reason: "This bucket will be used for access logging of cloudfront distribution validated and does not require access logging to be configured."
+
 
     # CloudFront
     WebsiteDistribution:
         Type: AWS::CloudFront::Distribution
+        DependsOn: SolutionAccessLoggingBucket
         Properties:
             DistributionConfig:
                 Comment: "Website distribution for Operations Conductor"
@@ -1735,6 +1818,10 @@ Resources:
                     CloudFrontDefaultCertificate: true
                 Enabled: true
                 HttpVersion: "http2"
+                Logging: 
+                    Bucket: !GetAtt SolutionAccessLoggingBucket.DomainName
+                    IncludeCookies: True
+                    Prefix: operationsconductorcloudfrontdistributionaccesslogs
         Metadata:
             cfn_nag:
                 rules_to_suppress:

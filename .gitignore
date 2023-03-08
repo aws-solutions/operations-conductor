@@ -1,0 +1,35 @@
+# compiled output
+**/dist
+**/open-source
+**/.zip
+**/tmp
+**/out-tsc
+**/build
+**/global-s3-assets
+**/regional-s3-assets
+deployment/package-lock.json
+
+# dependencies
+**/node_modules
+
+# e2e
+**/e2e/*.js
+**/e2e/*.map
+
+# misc
+**/npm-debug.log
+**/testem.log
+**/.vscode
+**/.idea
+**.nyc_output
+**.pem
+**/aws_exports.js
+
+# System Files
+**/.DS_Store
+
+# Coverage files
+**/coverage
+
+# Local
+**/local.ts

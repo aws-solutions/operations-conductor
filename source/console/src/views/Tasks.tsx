@@ -1,18 +1,7 @@
-/*****************************************************************************
- * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.        *
- *                                                                           *
- * Licensed under the Apache License, Version 2.0 (the "License").           *
- * You may not use this file except in compliance with the License.          *
- * A copy of the License is located at                                       *
- *                                                                           *
- *     http://www.apache.org/licenses/LICENSE-2.0                            *
- *                                                                           *
- *  Unless required by applicable law or agreed to in writing, software      *
- *  distributed under the License is distributed on an "AS IS" BASIS,        *
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. *
- *  See the License for the specific language governing permissions and      *
- *  limitations under the License.                                           *
- ****************************************************************************/
+/*
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
 import * as React from 'react';
 
@@ -32,16 +21,18 @@ interface IProps {
 // States
 interface IState {
     token: string;
-    tasks: Task[];
+    tasks: TaskDisplay[];
     isLoading: boolean;
     error: string;
 }
 
 // Task
-interface Task {
+export interface Task {
     taskId: string;
     name: string;
     description: string;
+}
+interface TaskDisplay extends Task {
     visible?: boolean;
 }
 
@@ -91,11 +82,11 @@ class Tasks extends React.Component<IProps, IState> {
         };
 
         try {
-            let tasks: Task[] = await API.get(API_NAME, path, params);
+            let tasks: TaskDisplay[] = await API.get(API_NAME, path, params);
             for (let task of tasks) {
                 task.visible = true;
             }
-            tasks.sort((a: Task, b: Task) => a.name.localeCompare(b.name));
+            tasks.sort((a: TaskDisplay, b: TaskDisplay) => a.name.localeCompare(b.name));
             this.setState({ tasks });
         } catch (error) {
             this.handleError('Error occurred while getting list of tasks.', error);
@@ -109,7 +100,7 @@ class Tasks extends React.Component<IProps, IState> {
         let keyword = event.target.value;
         let tasks = this.state.tasks;
         for (let task of tasks) {
-            if (keyword === '' || task.name.indexOf(keyword) > -1) {
+            if (keyword === '' || task.name.toLowerCase().indexOf(keyword.toLowerCase()) > -1) {
                 task.visible = true;
             } else {
                 task.visible = false;
@@ -122,9 +113,9 @@ class Tasks extends React.Component<IProps, IState> {
         let order = event.target.value;
         let tasks = this.state.tasks;
         if (order === 'asc') {
-            tasks.sort((a: Task, b: Task) => a.name.localeCompare(b.name));
+            tasks.sort((a: TaskDisplay, b: TaskDisplay) => a.name.localeCompare(b.name));
         } else if (order === 'desc') {
-            tasks.sort((a: Task, b: Task) => b.name.localeCompare(a.name));
+            tasks.sort((a: TaskDisplay, b: TaskDisplay) => b.name.localeCompare(a.name));
         }
 
         this.setState({ tasks });
@@ -205,11 +196,11 @@ class Tasks extends React.Component<IProps, IState> {
                         }
                         {
                             this.state.tasks
-                                .filter((task: Task) => task.visible)
-                                .map((task: Task) => {
+                                .filter((task: TaskDisplay) => task.visible)
+                                .map((task: TaskDisplay) => {
                                     return (
                                         <Col md={4} key={task.taskId}>
-                                            <Panel>
+                                            <Panel data-testid={`${task.name}-panel`}>
                                                 <Panel.Heading>
                                                     <Panel.Title componentClass="h3">{task.name}</Panel.Title>
                                                 </Panel.Heading>

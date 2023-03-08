@@ -1,18 +1,7 @@
-/*****************************************************************************
- * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.        *
- *                                                                           *
- * Licensed under the Apache License, Version 2.0 (the "License").           *
- * You may not use this file except in compliance with the License.          *
- * A copy of the License is located at                                       *
- *                                                                           *
- *     http://www.apache.org/licenses/LICENSE-2.0                            *
- *                                                                           *
- *  Unless required by applicable law or agreed to in writing, software      *
- *  distributed under the License is distributed on an "AS IS" BASIS,        *
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. *
- *  See the License for the specific language governing permissions and      *
- *  limitations under the License.                                           *
- ****************************************************************************/
+/*
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
 import * as React from 'react';
 
@@ -33,18 +22,24 @@ interface IProps {
 // States
 interface IState {
     token: string;
-    actions: Action[];
-    sortIcon: string;
+    actions: DisplayAction[];
+    sortDirection: SortDirection
     isLoading: boolean;
     error: string;
 }
 
 // Action interface
-interface Action {
+export interface Action {
     name: string;
     owner: string;
     description: string;
+}
+interface DisplayAction extends Action{
     visible?: boolean;
+}
+
+enum SortDirection {
+    ASC, DESC
 }
 
 // External variables
@@ -58,7 +53,7 @@ class Actions extends React.Component<IProps, IState> {
         this.state = {
             token: '',
             actions: [],
-            sortIcon: 'sort-by-attributes',
+            sortDirection: SortDirection.ASC,
             isLoading: false,
             error: ''
         };
@@ -94,11 +89,11 @@ class Actions extends React.Component<IProps, IState> {
         };
 
         try {
-            let actions: Action[] = await API.get(API_NAME, path, params);
+            let actions: DisplayAction[] = await API.get(API_NAME, path, params);
             for (let action of actions) {
                 action.visible = true;
             }
-            actions.sort((a: Action, b: Action) => a.name.localeCompare(b.name));
+            this.sortActions(actions, this.state.sortDirection)
             this.setState({ actions });
         } catch (error) {
             this.handleError('Error occurred while getting list of actions.', error);
@@ -112,7 +107,7 @@ class Actions extends React.Component<IProps, IState> {
         let keyword = event.target.value;
         let actions = this.state.actions;
         for (let action of actions) {
-            if (keyword === '' || action.name.indexOf(keyword) > -1) {
+            if (keyword === '' || action.name.toLowerCase().indexOf(keyword.toLowerCase()) > -1) {
                 action.visible = true;
             } else {
                 action.visible = false;
@@ -121,19 +116,36 @@ class Actions extends React.Component<IProps, IState> {
 
         this.setState({ actions });
     };
-    handleSort = () => {
-        let sortIcon = this.state.sortIcon;
-        let actions = this.state.actions;
-        if (sortIcon === 'sort-by-attributes') {
-            actions.sort((a: Action, b: Action) => b.name.localeCompare(a.name));
-            sortIcon = 'sort-by-attributes-alt';
-        } else if (sortIcon === 'sort-by-attributes-alt') {
-            actions.sort((a: Action, b: Action) => a.name.localeCompare(b.name));
-            sortIcon = 'sort-by-attributes';
+
+    toggleSortDirection = () => {
+        this.setState((prevState, props) => {
+            const newSortDirection = prevState.sortDirection === SortDirection.ASC ? SortDirection.DESC : SortDirection.ASC
+            const newlySortedActions = this.sortActions(prevState.actions, newSortDirection)
+
+            return {
+                sortDirection: newSortDirection,
+                actions: newlySortedActions
+            }
+        })
+    };
+
+    sortActions = (actions: DisplayAction[], sortDirection: SortDirection) => {
+        switch (sortDirection) {
+            case SortDirection.ASC: return actions.sort((a: DisplayAction, b: DisplayAction) => a.name.localeCompare(b.name));
+            case SortDirection.DESC: return actions.sort((a: DisplayAction, b: DisplayAction) => b.name.localeCompare(a.name));
+            default: throw new Error("Invalid SortDirection")
         }
 
-        this.setState({ actions, sortIcon });
-    };
+    }
+
+
+    getSortIconName = () => {
+        switch (this.state.sortDirection) {
+            case SortDirection.ASC: return 'sort-by-attributes';
+            case SortDirection.DESC: return 'sort-by-attributes-alt';
+        }
+    }
+
 
     // Handles error
     handleError = (message: string, error: any) => {
@@ -185,8 +197,8 @@ class Actions extends React.Component<IProps, IState> {
                                         <th>
                                             Action Name
                                             &nbsp;
-                                            <Button bsSize="xsmall" onClick={this.handleSort}>
-                                                <Glyphicon glyph={this.state.sortIcon} />
+                                            <Button bsSize="xsmall" onClick={this.toggleSortDirection} data-testid="sort-btn">
+                                                <Glyphicon glyph={this.getSortIconName()} />
                                             </Button>
                                         </th>
                                         <th>Owner</th>
@@ -209,8 +221,8 @@ class Actions extends React.Component<IProps, IState> {
                                     }
                                     {
                                         this.state.actions
-                                            .filter((action: Action) => action.visible)
-                                            .map((action: Action) => {
+                                            .filter((action: DisplayAction) => action.visible)
+                                            .map((action: DisplayAction) => {
                                                 return (
                                                     <tr key={action.name}>
                                                         <td>{action.name}</td>

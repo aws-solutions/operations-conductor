@@ -1,18 +1,7 @@
-/*****************************************************************************
- * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.        *
- *                                                                           *
- * Licensed under the Apache License, Version 2.0 (the "License").           *
- * You may not use this file except in compliance with the License.          *
- * A copy of the License is located at                                       *
- *                                                                           *
- *     http://www.apache.org/licenses/LICENSE-2.0                            *
- *                                                                           *
- *  Unless required by applicable law or agreed to in writing, software      *
- *  distributed under the License is distributed on an "AS IS" BASIS,        *
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. *
- *  See the License for the specific language governing permissions and      *
- *  limitations under the License.                                           *
- ****************************************************************************/
+/*
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
 import * as AWS from 'aws-sdk';
 import { factory } from '../logger';
@@ -169,7 +158,7 @@ export class User {
      * @param {UserInfo} user - user information to create
      */
     async createUser(user: UserInfo): Promise<UserInfo | ErrorReturn> {
-        if (!COMMON_UTIL.isStringValuesValid([user.name, user.email, user.group])) {
+        if (!COMMON_UTIL.areNonEmptyStrings([user.name, user.email, user.group])) {
             return Promise.reject(
                 COMMON_UTIL.getErrorObject('CreateUserFailure', 400, 'User name and E-Mail and Group cannot be empty.')
             );
@@ -228,7 +217,7 @@ export class User {
      * @param {string} group - group name for the user
      */
     async setUserGroup(username: string, group: string): Promise<void | ErrorReturn> {
-        if (!COMMON_UTIL.isStringValuesValid([username, group])) {
+        if (!COMMON_UTIL.areNonEmptyStrings([username, group])) {
             return Promise.reject(
                 COMMON_UTIL.getErrorObject('SetUserGroupFailure', 400, 'Username and Group cannot be empty.')
             );
@@ -257,7 +246,7 @@ export class User {
      * @param {string} group - group for the user
      */
     async editUser(username: string, group: string): Promise<UserInfo | ErrorReturn> {
-        if (!COMMON_UTIL.isStringValuesValid([username, group])) {
+        if (!COMMON_UTIL.areNonEmptyStrings([username, group])) {
             return Promise.reject(
                 COMMON_UTIL.getErrorObject('EditUserFailure', 400, 'Username and Group cannot be empty.')
             );
@@ -296,7 +285,7 @@ export class User {
      * @param {string} group - group to remove a user
      */
     async removeUserGroup(username: string, group: string): Promise<void | ErrorReturn> {
-        if (!COMMON_UTIL.isStringValuesValid([username, group])) {
+        if (!COMMON_UTIL.areNonEmptyStrings([username, group])) {
             return Promise.reject(
                 COMMON_UTIL.getErrorObject('RemoveUserGroupFailure', 400, 'Username and Group cannot be empty.')
             );
@@ -324,7 +313,7 @@ export class User {
      * @param {string} username - username to delete
      */
     async deleteUser(username: string): Promise<void | ErrorReturn> {
-        if (!COMMON_UTIL.isStringValuesValid([username])) {
+        if (!COMMON_UTIL.areNonEmptyStrings([username])) {
             return Promise.reject(
                 COMMON_UTIL.getErrorObject('DeleteUserFailure', 400, 'Username cannot be empty.')
             );

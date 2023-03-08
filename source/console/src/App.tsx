@@ -1,18 +1,7 @@
-/*****************************************************************************
- * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.        *
- *                                                                           *
- * Licensed under the Apache License, Version 2.0 (the "License").           *
- * You may not use this file except in compliance with the License.          *
- * A copy of the License is located at                                       *
- *                                                                           *
- *     http://www.apache.org/licenses/LICENSE-2.0                            *
- *                                                                           *
- *  Unless required by applicable law or agreed to in writing, software      *
- *  distributed under the License is distributed on an "AS IS" BASIS,        *
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. *
- *  See the License for the specific language governing permissions and      *
- *  limitations under the License.                                           *
- ****************************************************************************/
+/*
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
 import * as React from 'react';
 import { Logger } from '@aws-amplify/core';
@@ -33,12 +22,10 @@ import AutomationExecutionDetail from './views/AutomationExecutionDetail';
 import Footer from './components/Footer';
 
 interface IProps {
-    authState?: any;
-    groups?: string[];
+    userGroups: string[];
 }
 
 interface IState {
-    groups?: string[];
     token: string;
 }
 
@@ -49,7 +36,6 @@ class App extends React.Component<IProps, IState> {
         super(props);
 
         this.state = {
-            groups: [],
             token: ''
         };
     }
@@ -67,60 +53,61 @@ class App extends React.Component<IProps, IState> {
         });
     };
 
+    userIsInAdminGroup = () => {
+        return this.props.userGroups.indexOf('Admin') > -1;
+    };
+
     render() {
-        if (this.props.authState === 'signedIn') {
-            return (
-                <div className="main-wrapper">
-                    <Router>
-                        <Navbar>
-                            <Navbar.Header>
-                                <Navbar.Brand>Operations Conductor on AWS</Navbar.Brand>
-                            </Navbar.Header>
-                            <Nav>
-                                <LinkContainer to="/tasks">
+        return (
+            <div className="main-wrapper">
+                <Router>
+                    <Navbar>
+                        <Navbar.Header>
+                            <Navbar.Brand>Operations Conductor on AWS</Navbar.Brand>
+                        </Navbar.Header>
+                        <Nav>
+                            <LinkContainer to="/tasks">
+                                <NavItem>
+                                    <Glyphicon glyph="tasks" /> Tasks
+                                </NavItem>
+                            </LinkContainer>
+                            {
+                                this.userIsInAdminGroup() &&
+                                <LinkContainer to="/users">
                                     <NavItem>
-                                        <Glyphicon glyph="tasks" /> Tasks
+                                        <Glyphicon glyph="user" /> Users
                                     </NavItem>
                                 </LinkContainer>
-                                {
-                                    this.props.groups!.indexOf('Admin') > -1 &&
-                                    <LinkContainer to="/users">
-                                        <NavItem>
-                                            <Glyphicon glyph="user" /> Users
-                                        </NavItem>
-                                    </LinkContainer>
-                                }
-                            </Nav>
-                            <Nav pullRight>
-                                <NavItem onClick={() => this.signout()}>Sign Out</NavItem>
-                            </Nav>
-                        </Navbar>
-                        <Switch>
-                            <Route exact path="/tasks"
-                                render={(props) => (<Tasks {...props} getApiToken={this.getApiToken} />)} />
-                            <Route exact path="/tasks/actions"
-                                render={(props) => (<Actions {...props} getApiToken={this.getApiToken} />)} />
-                            <Route exact path="/tasks/create"
-                                render={(props) => (<TaskCreate {...props} getApiToken={this.getApiToken} />)} />
-                            <Route exact path="/tasks/edit"
-                                render={(props) => (<TaskCreate {...props} getApiToken={this.getApiToken} />)} />
-                            <Route exact path="/tasks/:taskId"
-                                render={(props) => (<TaskDetail {...props} getApiToken={this.getApiToken} />)} />
-                            <Route exact path="/tasks/:taskId/executions/:parentExecutionId"
-                                render={(props) => (<AutomationExecutions {...props} getApiToken={this.getApiToken} />)} />
-                            <Route exact path="/tasks/:taskId/executions/:parentExecutionId/:automationExecutionId"
-                                render={(props) => (<AutomationExecutionDetail {...props} getApiToken={this.getApiToken} />)} />
-                            <Route exact path="/users"
-                                render={(props) => (<Users {...props} getApiToken={this.getApiToken} />)} />
-                            <Redirect to="/tasks" />
-                        </Switch>
-                    </Router>
-                    <Footer />
-                </div>
-            );
-        } else {
-            return null;
-        }
+                            }
+                        </Nav>
+                        <Nav pullRight>
+                            <NavItem onClick={() => this.signout()}>Sign Out</NavItem>
+                        </Nav>
+                    </Navbar>
+                    <Switch>
+                        <Route exact path="/tasks"
+                            render={(props) => (<Tasks {...props} getApiToken={this.getApiToken} />)} />
+                        <Route exact path="/tasks/actions"
+                            render={(props) => (<Actions {...props} getApiToken={this.getApiToken} />)} />
+                        <Route exact path="/tasks/create"
+                            render={(props) => (<TaskCreate {...props} getApiToken={this.getApiToken} />)} />
+                        <Route exact path="/tasks/edit"
+                            render={(props) => (<TaskCreate {...props} getApiToken={this.getApiToken} />)} />
+                        <Route exact path="/tasks/:taskId"
+                            render={(props) => (<TaskDetail {...props} getApiToken={this.getApiToken} />)} />
+                        <Route exact path="/tasks/:taskId/executions/:parentExecutionId"
+                            render={(props) => (<AutomationExecutions {...props} getApiToken={this.getApiToken} />)} />
+                        <Route exact path="/tasks/:taskId/executions/:parentExecutionId/:automationExecutionId"
+                            render={(props) => (<AutomationExecutionDetail {...props} getApiToken={this.getApiToken} />)} />
+                        <Route exact path="/users"
+                            render={(props) => (<Users {...props} getApiToken={this.getApiToken} />)} />
+                        <Redirect to="/tasks" />
+                    </Switch>
+                </Router>
+                <Footer />
+            </div>
+        );
+
     }
 }
 

@@ -1,5 +1,10 @@
 #!/bin/bash
 #
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+
+#
 # This assumes all of the OS-level configuration has been completed and git repo has already been cloned
 #
 # This script should be run from the repo's deployment directory
@@ -19,7 +24,7 @@
 # Check to see if input has been provided:
 if [ -z "$1" ] || [ -z "$2" ] || [ -z "$3" ]; then
     echo "Please provide the base source bucket name, trademark approved solution name and version where the lambda code will eventually reside."
-    echo "For example: ./build-s3-dist.sh solutions trademarked-solution-name v1.0.3"
+    echo "For example: ./build-s3-dist.sh solutions trademarked-solution-name v1.0.4"
     exit 1
 fi
 

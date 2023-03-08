@@ -1,18 +1,7 @@
-/*****************************************************************************
- * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.        *
- *                                                                           *
- * Licensed under the Apache License, Version 2.0 (the "License").           *
- * You may not use this file except in compliance with the License.          *
- * A copy of the License is located at                                       *
- *                                                                           *
- *     http://www.apache.org/licenses/LICENSE-2.0                            *
- *                                                                           *
- *  Unless required by applicable law or agreed to in writing, software      *
- *  distributed under the License is distributed on an "AS IS" BASIS,        *
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. *
- *  See the License for the specific language governing permissions and      *
- *  limitations under the License.                                           *
- ****************************************************************************/
+/*
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
 import * as fs from 'fs';
 import { DocumentClient } from 'aws-sdk/clients/dynamodb';
@@ -235,7 +224,7 @@ export class Task {
      * @param {string} taskId - task ID to get
      */
     async getTask(taskId: string): Promise<AttributeMap | ErrorReturn> {
-        if (!COMMON_UTIL.isStringValuesValid([taskId])) {
+        if (!COMMON_UTIL.areNonEmptyStrings([taskId])) {
             return Promise.reject(
                 COMMON_UTIL.getErrorObject('GetTaskFailure', 400, 'Task ID cannot be empty.')
             );
@@ -280,7 +269,7 @@ export class Task {
         ];
 
         // Checks if the fields are empty
-        if (!COMMON_UTIL.isStringValuesValid(requiredFields)) {
+        if (!COMMON_UTIL.areNonEmptyStrings(requiredFields)) {
             return Promise.reject(
                 COMMON_UTIL.getErrorObject('CreateTaskFailure', 400, 'Required values cannot be empty.')
             );
@@ -355,7 +344,7 @@ export class Task {
             updatedTask.triggerType
         ];
 
-        if (!COMMON_UTIL.isStringValuesValid(requiredFields)) {
+        if (!COMMON_UTIL.areNonEmptyStrings(requiredFields)) {
             return Promise.reject(
                 COMMON_UTIL.getErrorObject('EditTaskFailure', 400, 'Required values cannot be empty.')
             );
@@ -408,7 +397,7 @@ export class Task {
      * @param {string} taskId - task ID to delete
      */
     async deleteTask(taskId: string): Promise<void | ErrorReturn> {
-        if (!COMMON_UTIL.isStringValuesValid([taskId])) {
+        if (!COMMON_UTIL.areNonEmptyStrings([taskId])) {
             return Promise.reject(
                 COMMON_UTIL.getErrorObject('DeleteTaskFailure', 400, 'Task ID cannot be empty.')
             );
@@ -507,7 +496,7 @@ export class Task {
          * For example, if the limit is 3, and the number of returned items is 3 but there is no more actual data to query, DynamoDB returns LastEvaluatedKey.
          * To resolve the bug, it will add 1 to the limit, and return the items after removing the last item. LastEvaluatedKey would be the new last item of the items.
          */
-        if (!COMMON_UTIL.isStringValuesValid([taskId])) {
+        if (!COMMON_UTIL.areNonEmptyStrings([taskId])) {
             return Promise.reject(
                 COMMON_UTIL.getErrorObject('GetTaskExecutionsFailure', 400, 'Task ID cannot be empty.')
             );
@@ -573,7 +562,7 @@ export class Task {
          * For example, if the limit is 3, and the number of returned items is 3 but there is no more actual data to query, DynamoDB returns LastEvaluatedKey.
          * To resolve the bug, it will add 1 to the limit, and return the items after removing the last item. LastEvaluatedKey would be the new last item of the items.
          */
-        if (!COMMON_UTIL.isStringValuesValid([taskId, parentExecutionId])) {
+        if (!COMMON_UTIL.areNonEmptyStrings([taskId, parentExecutionId])) {
             return Promise.reject(
                 COMMON_UTIL.getErrorObject('GetAutomationExecutionsFailure', 400, 'Task ID and parent execution ID cannot be empty.')
             );
@@ -652,7 +641,7 @@ export class Task {
      * @param {string} automationExecutionId - AWS Systems Manager execution ID
      */
     async getAutomationExecution(taskId: string, parentExecutionId: string, automationExecutionId: string): Promise<any> {
-        if (!COMMON_UTIL.isStringValuesValid([taskId, parentExecutionId, automationExecutionId])) {
+        if (!COMMON_UTIL.areNonEmptyStrings([taskId, parentExecutionId, automationExecutionId])) {
             return Promise.reject(
                 COMMON_UTIL.getErrorObject('GetAutomationExecutionFailure', 400, 'Task ID, parent execution ID and automation execution ID cannot be empty.')
             );

@@ -79,7 +79,7 @@
             Description: "The Operations Conductor event forwarder"
             Handler: index.handler
             Role: !GetAtt EventForwarderRole.Arn
-            Runtime: nodejs14.x
+            Runtime: nodejs16.x
             MemorySize: 128
             Timeout: 15
             Environment:

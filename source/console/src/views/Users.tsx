@@ -1,18 +1,7 @@
-/*****************************************************************************
- * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.        *
- *                                                                           *
- * Licensed under the Apache License, Version 2.0 (the "License").           *
- * You may not use this file except in compliance with the License.          *
- * A copy of the License is located at                                       *
- *                                                                           *
- *     http://www.apache.org/licenses/LICENSE-2.0                            *
- *                                                                           *
- *  Unless required by applicable law or agreed to in writing, software      *
- *  distributed under the License is distributed on an "AS IS" BASIS,        *
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. *
- *  See the License for the specific language governing permissions and      *
- *  limitations under the License.                                           *
- ****************************************************************************/
+/*
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
 import * as React from 'react';
 
@@ -33,7 +22,7 @@ interface IProps{
 // States
 interface IState {
     token: string;
-    users: User[];
+    users: HideableUser[];
     sortIcon: string;
     isLoading: boolean;
     error: string;
@@ -51,12 +40,14 @@ interface IState {
 }
 
 // User interface
-interface User {
+export interface User {
     username: string;
     name: string;
     email: string;
     group: string;
     status: string;
+}
+interface HideableUser extends User{
     visible?: boolean;
 }
 
@@ -141,7 +132,7 @@ class Users extends React.Component<IProps, IState> {
         };
 
         try {
-            let users: User[] = await API.get(apiName, path, params);
+            let users: HideableUser[] = await API.get(apiName, path, params);
 
             // Filters the result
             let keyword = (document.getElementById("searchKeyword") as HTMLInputElement).value;
@@ -156,9 +147,9 @@ class Users extends React.Component<IProps, IState> {
             // Sorts the result
             let sortIcon = this.state.sortIcon;
             if (sortIcon === 'sort-by-attributes') {
-                users.sort((a: User, b: User) => a.name.localeCompare(b.name));
+                users.sort((a: HideableUser, b: HideableUser) => a.name.localeCompare(b.name));
             } else if (sortIcon === 'sort-by-attributes-alt') {
-                users.sort((a: User, b: User) => b.name.localeCompare(a.name));
+                users.sort((a: HideableUser, b: HideableUser) => b.name.localeCompare(a.name));
             }
             this.setState({ users });
         } catch (error) {
@@ -188,7 +179,7 @@ class Users extends React.Component<IProps, IState> {
         };
 
         try {
-            let user: User = await API.post(apiName, path, params);
+            let user: HideableUser = await API.post(apiName, path, params);
             LOGGER.info(`User invited: ${JSON.stringify(user)}`);
 
             this.setState({
@@ -223,7 +214,7 @@ class Users extends React.Component<IProps, IState> {
         };
 
         try {
-            let user: User = await API.put(apiName, path, params);
+            let user: HideableUser = await API.put(apiName, path, params);
             LOGGER.info(`User edited: ${JSON.stringify(user)}`);
 
             this.setState({ showModal: false });
@@ -313,10 +304,10 @@ class Users extends React.Component<IProps, IState> {
         let sortIcon = this.state.sortIcon;
         let users = this.state.users;
         if (sortIcon === 'sort-by-attributes') {
-            users.sort((a: User, b: User) => b.name.localeCompare(a.name));
+            users.sort((a: HideableUser, b: HideableUser) => b.name.localeCompare(a.name));
             sortIcon = 'sort-by-attributes-alt';
         } else if (sortIcon === 'sort-by-attributes-alt') {
-            users.sort((a: User, b: User) => a.name.localeCompare(b.name));
+            users.sort((a: HideableUser, b: HideableUser) => a.name.localeCompare(b.name));
             sortIcon = 'sort-by-attributes';
         }
 
@@ -413,8 +404,8 @@ class Users extends React.Component<IProps, IState> {
                                     }
                                     {
                                         this.state.users
-                                            .filter((user: User) => user.visible)
-                                            .map((user: User) => {
+                                            .filter((user: HideableUser) => user.visible)
+                                            .map((user: HideableUser) => {
                                                 return (
                                                     <tr key={user.username}>
                                                         <td>{user.name}</td>

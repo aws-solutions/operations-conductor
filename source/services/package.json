@@ -1,16 +1,16 @@
 {
     "name": "operations-conductor-services",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "description": "Operations Conductor solution services Lambda function package",
     "main": "index.js",
     "scripts": {
         "build:ts": "tsc --version && tsc --project tsconfig.json",
-        "build:clean": "rm -rf package-lock.json && rm -rf build && rm -rf node_modules",
+        "build:clean": "rm -rf build",
         "build:copy": "rsync -r --exclude=*.ts custom-resource/ssm/ build/custom-resource/ssm/ && rsync -r --exclude=*.ts tasks/ build/tasks/",
         "build:zip": "cp -r ./node_modules/ ./build/node_modules/ && cd build && zip -rq operations-conductor-services.zip .",
         "build:lambda-edge": "cp custom-resource/lambda-edge/index.js build/lambda-edge && cd build/lambda-edge && zip operations-conductor-lambda-edge.zip index.js",
-        "build": "npm run build:clean && npm install && npm run build:ts && npm run build:copy && npm run build:zip",
-        "package": "npm run build:clean && npm install && npm run build:ts && npm run build:copy && npm prune --production && npm run build:zip",
+        "build": "npm run build:clean && npm ci && npm run build:ts && npm run build:copy && npm run build:zip",
+        "package": "npm run build:clean && npm ci && npm run build:ts && npm run build:copy && npm prune --production && npm run build:zip",
         "test": "npm install && CI=true jest --config jestconfig.json --coverage"
     },
     "dependencies": {
