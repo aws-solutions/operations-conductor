@@ -1,4 +1,12 @@
+# Deprecation Notice
+As of 03/03/2023, Operations Conductor on AWS has been deprecated and will not be receiving any additional 
+features or updates. We encourage customers to explore using 
+[Amazon EventBridge Rules](https://docs.aws.amazon.com/scheduler/latest/UserGuide/what-is-scheduler.html) 
+to create, run, and manage tasks from one central, managed service.
+
+
 # Operations Conductor on AWS
+
 ## Description
 Operations Conductor on AWS is a framework that provides an easy-to-use interface for automating and orchestrating operational tasks to manage AWS resources at scale.
 
